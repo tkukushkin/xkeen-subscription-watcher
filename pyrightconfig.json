@@ -1,0 +1,14 @@
+{
+  "include": ["src", "tests"],
+  "executionEnvironments": [
+    {
+      "root": "src",
+      "typeCheckingMode": "strict"
+    },
+    {
+      "root": "tests",
+      "extraPaths": ["."],
+      "typeCheckingMode": "basic"
+    }
+  ]
+}

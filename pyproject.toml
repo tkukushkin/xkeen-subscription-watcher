@@ -1,0 +1,42 @@
+[project]
+name = "xkeen-subscription-watcher"
+version = "0.1.0"
+description = "Add your description here"
+license = "MIT"
+readme = "README.md"
+authors = [
+  { name = "Timofei Kukushkin", email = "tima@kukushkin.me" }
+]
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+xkeen-subscription-watcher = "xkeen_subscription_watcher.main:main"
+
+[project.urls]
+Homepage = "https://github.com/tkukushkin/xkeen-subscription-watcher"
+Repository = "https://github.com/tkukushkin/xkeen-subscription-watcher.git"
+Issues = "https://github.com/tkukushkin/xkeen-subscription-watcher/issues"
+Changelog = "https://github.com/tkukushkin/xkeen-subscription-watcher/releases"
+
+[dependency-groups]
+test = [
+  "pytest",
+]
+lint = [
+  { include-group = "test" },
+  "pyright",
+  "ruff",
+]
+dev = [
+  { include-group = "test" },
+  { include-group = "lint" },
+  "tox",
+  "tox-uv",
+]
+
+[build-system]
+requires = ["setuptools >= 61.0", "setuptools-scm >= 8"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
