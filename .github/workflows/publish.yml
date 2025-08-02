@@ -1,0 +1,21 @@
+name: Publish to PyPI.org
+on:
+  release:
+    types: [ published ]
+jobs:
+  pypi-publish:
+    name: Upload release to PyPI
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+
+    - run: uv build
+
+    - name: Publish package
+      uses: pypa/gh-action-pypi-publish@release/v1
