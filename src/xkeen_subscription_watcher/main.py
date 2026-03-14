@@ -1,11 +1,12 @@
 #!/opt/bin/python
+import argparse
 import base64
 import json
 import logging
 import subprocess
-import sys
 import urllib.parse
 import urllib.request
+import urllib.response
 from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import dataclass
@@ -15,38 +16,74 @@ from typing import Any
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
-    subscriptions = _parse_args()
+    args = _parse_args()
 
-    xray_config = _get_xray_config(subscriptions)
+    updated = False
 
-    output_path = Path("/opt/etc/xray/configs/04_outbounds.generated.json")
+    for subscription in args.subscriptions:
+        try:
+            updated |= _process_subscription(subscription, args.output_dir)
+        except Exception:
+            logging.warning("Ошибка при обработке подписки %r, пропускаем.", subscription.tag, exc_info=True)
 
-    if output_path.exists() and json.loads(output_path.read_bytes()) == xray_config:
-        logging.info("Изменения подписок не найдены, завершаем работу.")
+    if not updated:
+        logging.info("Изменений в подписках не найдено, завершаем работу.")
         return
 
-    logging.info("Записываем новую конфигурацию в %s.", output_path)
-    output_path.write_text(json.dumps(xray_config, indent=2) + "\n", encoding="utf-8")
-
-    logging.info("Перезапускаем XKeen.")
-    subprocess.run(["xkeen", "-restart"], check=True)
+    if args.restart_xkeen:
+        logging.info("Перезапускаем XKeen.")
+        subprocess.run(["xkeen", "-restart"], check=True)
 
 
-def _parse_args() -> list["_Subscription"]:
-    result = []
+def _parse_args() -> "_Args":
+    parser = argparse.ArgumentParser(description="Скрипт для обработки подписок и генерации конфигураций для Xray.")
+    parser.add_argument(
+        "subscriptions",
+        nargs="+",
+        help="Подписки. Пример: mytag=http://example.com/subscription",
+        metavar="<tag>=<url>",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default="/opt/etc/xray/configs",
+        help="Каталог для сохранения сгенерированных конфигураций. По-умолчанию /opt/etc/xray/configs.",
+    )
+    parser.add_argument(
+        "--no-restart",
+        action="store_false",
+        dest="restart_xkeen",
+        help="Не перезапускать XKeen после обновления конфигураций.",
+    )
+    args = parser.parse_args()
+
+    subscriptions = []
     tags = set[str]()
-    for arg in sys.argv[1:]:
-        tag, url = arg.split("=", 1)
+    for arg in args.subscriptions:
+        tag, sep, url = arg.partition("=")
+        if not sep:
+            raise ValueError(f"Неверный формат подписки: {arg!r}. Ожидается <tag>=<url>.")
+
         if tag in tags:
             raise ValueError(f"Тег {tag!r} указан несколько раз, используйте уникальные имена.")
         tags.add(tag)
 
-        if not url.startswith("http"):
+        if not url.startswith(("http://", "https://")):
             raise ValueError(f"Неизвестный формат URL: {url}. URL должен начинаться на http:// или https://.")
 
-        result.append(_Subscription(tag=tag, url=url))
+        subscriptions.append(_Subscription(tag=tag, url=url))
 
-    return result
+    output_dir = Path(args.output_dir)
+    if not output_dir.is_dir():
+        raise ValueError(f"Указанный путь для --output-dir {output_dir} не является директорией.")
+
+    return _Args(subscriptions=subscriptions, output_dir=output_dir, restart_xkeen=args.restart_xkeen)
+
+
+@dataclass(frozen=True, slots=True)
+class _Args:
+    subscriptions: Sequence["_Subscription"]
+    output_dir: Path
+    restart_xkeen: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,81 +92,91 @@ class _Subscription:
     url: str
 
 
-def _get_xray_config(subscriptions: Sequence[_Subscription]) -> dict[str, Any]:
-    return {"outbounds": [_get_outbound(subscription) for subscription in subscriptions]}
+def _process_subscription(subscription: _Subscription, output_dir: Path) -> bool:
+    output_path = output_dir / f"04_outbounds.{subscription.tag}.json"
+
+    xray_config = {"outbounds": _get_outbounds(subscription)}
+
+    if output_path.exists() and json.loads(output_path.read_bytes()) == xray_config:
+        logging.info("Изменения в подписке %r не найдены, пропускаем.", subscription.tag)
+        return False
+
+    logging.info("Записываем новую конфигурацию для подписки %r в %s.", subscription.tag, output_path)
+    output_path.write_text(json.dumps(xray_config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return True
 
 
-def _get_outbound(subscription: _Subscription) -> dict[str, Any]:
+def _get_outbounds(subscription: _Subscription) -> list[dict[str, Any]]:
     logging.info("Запрашиваем URL подписки: %s.", subscription.url)
-    proxy_url = _get_proxy_url(subscription.url)
-    credentials = _parse_proxy_url(proxy_url)
-    logging.info("Используем прокси: %s.", proxy_url)
-    reality_settings = {
-        "serverName": credentials.server_name,
-        "fingerprint": "firefox",
-        "publicKey": credentials.public_key,
-    }
-    if credentials.spider_x:
-        reality_settings["spiderX"] = credentials.spider_x
-    if credentials.short_id:
-        reality_settings["shortId"] = credentials.short_id
-    return {
-        "tag": subscription.tag,
-        "protocol": "vless",
-        "settings": {
-            "vnext": [
-                {
-                    "address": credentials.address,
-                    "port": credentials.port,
-                    "users": [
-                        {
-                            "id": credentials.user_id,
-                            "encryption": credentials.encryption,
-                            "flow": credentials.flow,
-                        }
-                    ],
-                }
-            ],
-        },
-        "streamSettings": {
-            "network": credentials.network,
-            "security": credentials.security,
-            "realitySettings": reality_settings,
-        },
-    }
+    proxy_urls = _get_proxy_urls(subscription)
+    proxy_urls.sort()
+
+    result = []
+    for i, proxy_url in enumerate(proxy_urls, 1):
+        tag = f"{subscription.tag}--{_get_proxy_name(proxy_url) or i}"
+        logging.info("Используем прокси %s с тегом %r.", proxy_url, tag)
+        result.append(_generate_outbound(_parse_proxy_url(proxy_url), tag=tag))
+
+    return result
 
 
-def _get_proxy_url(subscription_url: str) -> str:
-    with urllib.request.urlopen(subscription_url, timeout=20) as response:
-        response_text = response.read().decode("utf-8")
+def _get_proxy_urls(subscription: _Subscription) -> list[str]:
+    try:
+        with _request(subscription.url, with_proxy=False) as response:
+            response_text = response.read().decode("utf-8")
+    except Exception:
+        logging.warning(
+            "Не удалось получить подписку %s без прокси, пробуем с прокси.", subscription.tag, exc_info=True
+        )
+        with _request(subscription.url, with_proxy=True) as response:
+            response_text = response.read().decode("utf-8")
+
     if response.status != 200:
         raise RuntimeError(
-            f"Не удалось получить подписку по URL: {subscription_url}, "
-            f"код ответа: {response.status}, текст: {response_text}"
+            f"Ошибка при получении подписки {subscription.tag}: код {response.status}, текст ответа: {response_text}"
         )
+
     return _parse_subscription_response_text(response_text)
 
 
-def _parse_subscription_response_text(response_text: str) -> str:
+def _request(subscription_url: str, *, with_proxy: bool) -> urllib.response.addinfourl:
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler(
+            {"http": "http://127.0.0.1:8080", "https": "http://127.0.0.1:8080"} if with_proxy else {}
+        )
+    )
+    return opener.open(subscription_url, timeout=20)
+
+
+def _parse_subscription_response_text(response_text: str) -> list[str]:
     response_text = response_text.strip()
 
     with suppress(ValueError):
         response_text = base64.b64decode(response_text.encode("utf-8"), validate=True).decode("utf-8").strip()
 
+    result = []
+
     for line in response_text.splitlines(keepends=False):
         line = line.strip()
         if line and line.startswith("vless://"):
-            return line
+            result.append(line)
 
-    raise RuntimeError("Не удалось найти ни одного URL прокси в ответе подписки в формате vless.")
+    return result
 
 
-def _parse_proxy_url(proxy_url: str) -> "_ProxyCredentials":
+def _get_proxy_name(url: str) -> str | None:
+    if "#" not in url:
+        return None
+    name = url.rsplit("#", 1)[-1].strip()
+    return "".join(c for c in name if c.isalnum() or c in (" -_")).strip()
+
+
+def _parse_proxy_url(proxy_url: str) -> "_Proxy":
     parse_result = urllib.parse.urlparse(proxy_url)
     query_params = dict(urllib.parse.parse_qsl(parse_result.query, keep_blank_values=True))
     assert parse_result.hostname, "URL должен содержать адрес сервера."
     assert parse_result.username, "URL должен содержать идентификатор пользователя."
-    return _ProxyCredentials(
+    return _Proxy(
         address=parse_result.hostname,
         port=parse_result.port or 443,
         user_id=parse_result.username,
@@ -145,7 +192,7 @@ def _parse_proxy_url(proxy_url: str) -> "_ProxyCredentials":
 
 
 @dataclass(frozen=True, slots=True)
-class _ProxyCredentials:
+class _Proxy:
     address: str
     port: int
     user_id: str
@@ -157,6 +204,43 @@ class _ProxyCredentials:
     public_key: str
     short_id: str | None
     spider_x: str | None
+
+
+def _generate_outbound(proxy: _Proxy, tag: str) -> dict[str, Any]:
+    reality_settings = {
+        "serverName": proxy.server_name,
+        "fingerprint": "firefox",
+        "publicKey": proxy.public_key,
+    }
+    if proxy.spider_x:
+        reality_settings["spiderX"] = proxy.spider_x
+    if proxy.short_id:
+        reality_settings["shortId"] = proxy.short_id
+
+    return {
+        "tag": tag,
+        "protocol": "vless",
+        "settings": {
+            "vnext": [
+                {
+                    "address": proxy.address,
+                    "port": proxy.port,
+                    "users": [
+                        {
+                            "id": proxy.user_id,
+                            "encryption": proxy.encryption,
+                            "flow": proxy.flow,
+                        }
+                    ],
+                }
+            ],
+        },
+        "streamSettings": {
+            "network": proxy.network,
+            "security": proxy.security,
+            "realitySettings": reality_settings,
+        },
+    }
 
 
 if __name__ == "__main__":

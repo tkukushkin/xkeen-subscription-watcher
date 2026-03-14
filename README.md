@@ -8,9 +8,9 @@ xkeen-subscription-watcher <tag>=<url>
 
 Можно передать несколько пар `<tag>=<url>`
 
-Скрипт получает из переданных подписок прокси, генерирует конфиг `04_outbounds.generated.json`. От каждой подписки берется только один прокси.
+Скрипт получает из переданных подписок прокси, генерирует конфиги `04_outbounds.<tag>.json`.
 
-Если конфиг изменился, выполняется `xkeen -restart`.
+Если конфиги изменились, выполняется `xkeen -restart`.
 
 ## Установка
 
@@ -26,9 +26,9 @@ crontab -e
 ```crontab
 0 * * * * /opt/sbin/xkeen-subscription-watcher <tag>=<url>
 ```
- 
-Убираем из 04_outbounds.json прокси, которые будут теперь генерироваться из подписок, иначе теги будут конфликтовать,
-оставляем например такое:
+
+Убираем из `04_outbounds.json` прокси, которые будут теперь генерироваться из подписок,
+иначе теги будут конфликтовать, оставляем например такое:
 
 ```json
 {
@@ -45,6 +45,36 @@ crontab -e
       }
     }
   ]
+}
+```
+
+В `05_routing.json` добавляем конфигурацию `balancers` и `burstObservatory` для автоматического выбора лучшего прокси,
+далее в `rules` используем `balancerTag` вместо `outboundTag`, например:
+
+```json
+{
+  "routing": {
+    "domainStrategy": "AsIs",
+    "balancers": [
+      {
+        "tag": "proxy",
+        "selector": ["<tag>"],
+        "strategy": {
+          "type": "leastPing"
+        }
+      }
+    ],
+    "rules": [
+      {
+        "inboundTag": ["socks", "http"],
+        "balancerTag": "proxy"
+      }
+    ]
+  },
+  "burstObservatory": {
+    "subjectSelector": ["<tag>"],
+    "pingConfig": {}
+  }
 }
 ```
 
