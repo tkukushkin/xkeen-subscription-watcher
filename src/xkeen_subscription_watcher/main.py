@@ -11,7 +11,7 @@ from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeAlias, assert_never
 
 
 def main() -> None:
@@ -158,7 +158,7 @@ def _parse_subscription_response_text(response_text: str) -> list[str]:
 
     for line in response_text.splitlines(keepends=False):
         line = line.strip()
-        if line and line.startswith("vless://"):
+        if line and line.startswith(("vless://", "ss://")):
             result.append(line)
 
     return result
@@ -176,23 +176,34 @@ def _parse_proxy_url(proxy_url: str) -> "_Proxy":
     query_params = dict(urllib.parse.parse_qsl(parse_result.query, keep_blank_values=True))
     assert parse_result.hostname, "URL должен содержать адрес сервера."
     assert parse_result.username, "URL должен содержать идентификатор пользователя."
-    return _Proxy(
-        address=parse_result.hostname,
-        port=parse_result.port or 443,
-        user_id=parse_result.username,
-        encryption=query_params.get("encryption", "none"),
-        flow=query_params["flow"],
-        network=query_params["type"],
-        security=query_params["security"],
-        server_name=query_params["sni"],
-        public_key=query_params["pbk"],
-        short_id=query_params.get("sid"),
-        spider_x=query_params.get("spx"),
-    )
+    if parse_result.scheme == "vless":
+        return _VlessProxy(
+            address=parse_result.hostname,
+            port=parse_result.port or 443,
+            user_id=parse_result.username,
+            encryption=query_params.get("encryption", "none"),
+            flow=query_params["flow"],
+            network=query_params["type"],
+            security=query_params["security"],
+            server_name=query_params["sni"],
+            public_key=query_params["pbk"],
+            short_id=query_params.get("sid"),
+            spider_x=query_params.get("spx"),
+        )
+    if parse_result.scheme == "ss":
+        assert parse_result.username, "URL должен содержать имя пользователя."
+        method, password = base64.b64decode(parse_result.username.encode("utf-8")).decode("utf-8").split(":", 1)
+        return _ShadowSocksProxy(
+            address=parse_result.hostname,
+            port=parse_result.port or 443,
+            method=method,
+            password=password,
+        )
+    raise AssertionError("unreachable")
 
 
 @dataclass(frozen=True, slots=True)
-class _Proxy:
+class _VlessProxy:
     address: str
     port: int
     user_id: str
@@ -206,41 +217,69 @@ class _Proxy:
     spider_x: str | None
 
 
-def _generate_outbound(proxy: _Proxy, tag: str) -> dict[str, Any]:
-    reality_settings = {
-        "serverName": proxy.server_name,
-        "fingerprint": "firefox",
-        "publicKey": proxy.public_key,
-    }
-    if proxy.spider_x:
-        reality_settings["spiderX"] = proxy.spider_x
-    if proxy.short_id:
-        reality_settings["shortId"] = proxy.short_id
+@dataclass(frozen=True, slots=True)
+class _ShadowSocksProxy:
+    address: str
+    port: int
+    method: str
+    password: str
 
-    return {
-        "tag": tag,
-        "protocol": "vless",
-        "settings": {
-            "vnext": [
-                {
-                    "address": proxy.address,
-                    "port": proxy.port,
-                    "users": [
-                        {
-                            "id": proxy.user_id,
-                            "encryption": proxy.encryption,
-                            "flow": proxy.flow,
-                        }
-                    ],
-                }
-            ],
-        },
-        "streamSettings": {
-            "network": proxy.network,
-            "security": proxy.security,
-            "realitySettings": reality_settings,
-        },
-    }
+
+_Proxy: TypeAlias = _VlessProxy | _ShadowSocksProxy
+
+
+def _generate_outbound(proxy: _Proxy, tag: str) -> dict[str, Any]:
+    if isinstance(proxy, _VlessProxy):
+        reality_settings = {
+            "serverName": proxy.server_name,
+            "fingerprint": "firefox",
+            "publicKey": proxy.public_key,
+        }
+        if proxy.spider_x:
+            reality_settings["spiderX"] = proxy.spider_x
+        if proxy.short_id:
+            reality_settings["shortId"] = proxy.short_id
+
+        return {
+            "tag": tag,
+            "protocol": "vless",
+            "settings": {
+                "vnext": [
+                    {
+                        "address": proxy.address,
+                        "port": proxy.port,
+                        "users": [
+                            {
+                                "id": proxy.user_id,
+                                "encryption": proxy.encryption,
+                                "flow": proxy.flow,
+                            }
+                        ],
+                    }
+                ],
+            },
+            "streamSettings": {
+                "network": proxy.network,
+                "security": proxy.security,
+                "realitySettings": reality_settings,
+            },
+        }
+    if isinstance(proxy, _ShadowSocksProxy):
+        return {
+            "tag": tag,
+            "protocol": "shadowsocks",
+            "settings": {
+                "servers": [
+                    {
+                        "address": proxy.address,
+                        "port": proxy.port,
+                        "method": proxy.method,
+                        "password": proxy.password,
+                    }
+                ],
+            },
+        }
+    assert_never(proxy)
 
 
 if __name__ == "__main__":
