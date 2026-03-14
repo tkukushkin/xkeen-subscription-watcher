@@ -1,0 +1,10 @@
+[run]
+source = ["src"]
+branch = true
+
+[report]
+show_missing = true
+exclude_also = [
+  "^ +raise AssertionError",
+  "^ +assert_never\\(",
+]

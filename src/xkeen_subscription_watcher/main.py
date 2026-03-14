@@ -22,7 +22,9 @@ def main() -> None:
 
     for subscription in args.subscriptions:
         try:
-            updated |= _process_subscription(subscription, args.output_dir)
+            updated |= _process_subscription(
+                subscription=subscription, output_dir=args.output_dir, dialer_proxies=args.dialer_proxies
+            )
         except Exception:
             logging.warning("Ошибка при обработке подписки %r, пропускаем.", subscription.tag, exc_info=True)
 
@@ -54,6 +56,7 @@ def _parse_args() -> "_Args":
         dest="restart_xkeen",
         help="Не перезапускать XKeen после обновления конфигураций.",
     )
+    parser.add_argument("--dialer-proxies", nargs="*", default=())
     args = parser.parse_args()
 
     subscriptions = []
@@ -76,7 +79,12 @@ def _parse_args() -> "_Args":
     if not output_dir.is_dir():
         raise ValueError(f"Указанный путь для --output-dir {output_dir} не является директорией.")
 
-    return _Args(subscriptions=subscriptions, output_dir=output_dir, restart_xkeen=args.restart_xkeen)
+    return _Args(
+        subscriptions=subscriptions,
+        output_dir=output_dir,
+        restart_xkeen=args.restart_xkeen,
+        dialer_proxies=args.dialer_proxies,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +92,7 @@ class _Args:
     subscriptions: Sequence["_Subscription"]
     output_dir: Path
     restart_xkeen: bool
+    dialer_proxies: Sequence[str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,10 +101,10 @@ class _Subscription:
     url: str
 
 
-def _process_subscription(subscription: _Subscription, output_dir: Path) -> bool:
+def _process_subscription(subscription: _Subscription, output_dir: Path, dialer_proxies: Sequence[str]) -> bool:
     output_path = output_dir / f"04_outbounds.{subscription.tag}.json"
 
-    xray_config = {"outbounds": _get_outbounds(subscription)}
+    xray_config = {"outbounds": _get_outbounds(subscription=subscription, dialer_proxies=dialer_proxies)}
 
     if output_path.exists() and json.loads(output_path.read_bytes()) == xray_config:
         logging.info("Изменения в подписке %r не найдены, пропускаем.", subscription.tag)
@@ -106,16 +115,18 @@ def _process_subscription(subscription: _Subscription, output_dir: Path) -> bool
     return True
 
 
-def _get_outbounds(subscription: _Subscription) -> list[dict[str, Any]]:
+def _get_outbounds(subscription: _Subscription, dialer_proxies: Sequence[str]) -> list[dict[str, Any]]:
     logging.info("Запрашиваем URL подписки: %s.", subscription.url)
     proxy_urls = _get_proxy_urls(subscription)
     proxy_urls.sort()
 
     result = []
     for i, proxy_url in enumerate(proxy_urls, 1):
+        proxy = _parse_proxy_url(proxy_url)
         tag = f"{subscription.tag}--{_get_proxy_name(proxy_url) or i}"
-        logging.info("Используем прокси %s с тегом %r.", proxy_url, tag)
-        result.append(_generate_outbound(_parse_proxy_url(proxy_url), tag=tag))
+        result.append(_generate_outbound(proxy=proxy, tag=tag))
+        for dialer_proxy in dialer_proxies:
+            result.append(_generate_outbound(proxy=proxy, tag=f"{tag}--{dialer_proxy}", dialer_proxy=dialer_proxy))
 
     return result
 
@@ -228,7 +239,9 @@ class _ShadowSocksProxy:
 _Proxy: TypeAlias = _VlessProxy | _ShadowSocksProxy
 
 
-def _generate_outbound(proxy: _Proxy, tag: str) -> dict[str, Any]:
+def _generate_outbound(proxy: _Proxy, tag: str, dialer_proxy: str | None = None) -> dict[str, Any]:
+    proxy_config: dict[str, Any]
+
     if isinstance(proxy, _VlessProxy):
         reality_settings = {
             "serverName": proxy.server_name,
@@ -240,8 +253,7 @@ def _generate_outbound(proxy: _Proxy, tag: str) -> dict[str, Any]:
         if proxy.short_id:
             reality_settings["shortId"] = proxy.short_id
 
-        return {
-            "tag": tag,
+        proxy_config = {
             "protocol": "vless",
             "settings": {
                 "vnext": [
@@ -264,9 +276,8 @@ def _generate_outbound(proxy: _Proxy, tag: str) -> dict[str, Any]:
                 "realitySettings": reality_settings,
             },
         }
-    if isinstance(proxy, _ShadowSocksProxy):
-        return {
-            "tag": tag,
+    elif isinstance(proxy, _ShadowSocksProxy):
+        proxy_config = {
             "protocol": "shadowsocks",
             "settings": {
                 "servers": [
@@ -279,7 +290,16 @@ def _generate_outbound(proxy: _Proxy, tag: str) -> dict[str, Any]:
                 ],
             },
         }
-    assert_never(proxy)
+    else:
+        assert_never(proxy)
+
+    result: dict[str, Any] = {"tag": tag, **proxy_config}
+
+    if dialer_proxy:
+        stream_settings = result.setdefault("streamSettings", {})
+        stream_settings["sockopt"] = {"dialerProxy": dialer_proxy}
+
+    return result
 
 
 if __name__ == "__main__":

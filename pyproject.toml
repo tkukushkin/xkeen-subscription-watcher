@@ -22,6 +22,7 @@ Changelog = "https://github.com/tkukushkin/xkeen-subscription-watcher/releases"
 [dependency-groups]
 test = [
   "pytest",
+  "pytest-cov",
 ]
 lint = [
   { include-group = "test" },
