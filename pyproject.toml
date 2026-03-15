@@ -1,6 +1,5 @@
 [project]
 name = "xkeen-subscription-watcher"
-version = "0.1.0"
 description = "Add your description here"
 license = "MIT"
 readme = "README.md"
@@ -8,6 +7,7 @@ authors = [
   { name = "Timofei Kukushkin", email = "tima@kukushkin.me" }
 ]
 requires-python = ">=3.11"
+dynamic = ["version"]
 dependencies = []
 
 [project.scripts]
