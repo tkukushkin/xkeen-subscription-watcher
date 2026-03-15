@@ -25,7 +25,11 @@ def main() -> None:
     for subscription in args.subscriptions:
         try:
             updated |= _process_subscription(
-                subscription=subscription, output_dir=args.output_dir, dialer_proxies=args.dialer_proxies
+                subscription=subscription,
+                output_dir=args.output_dir,
+                dialer_proxies=args.dialer_proxies,
+                single_proxy=args.single_proxy,
+                vless_fingerprint=args.vless_fingerprint,
             )
         except Exception:
             logging.warning("Ошибка при обработке подписки %r, пропускаем.", subscription.tag, exc_info=True)
@@ -58,6 +62,18 @@ def _parse_args() -> "_Args":
         dest="restart_xkeen",
         help="Не перезапускать XKeen после обновления конфигураций.",
     )
+    parser.add_argument(
+        "--single-proxy",
+        action="store_true",
+        dest="single_proxy",
+        help="Брать только первый прокси из подписки и не добавлять имя к тегу.",
+    )
+    parser.add_argument(
+        "--vless-fingerprint",
+        default=None,
+        dest="vless_fingerprint",
+        help="Переопределить fingerprint для VLESS подключений.",
+    )
     parser.add_argument("--dialer-proxies", nargs="*", default=())
     args = parser.parse_args()
 
@@ -86,6 +102,8 @@ def _parse_args() -> "_Args":
         output_dir=output_dir,
         restart_xkeen=args.restart_xkeen,
         dialer_proxies=args.dialer_proxies,
+        single_proxy=args.single_proxy,
+        vless_fingerprint=args.vless_fingerprint,
     )
 
 
@@ -95,6 +113,8 @@ class _Args:
     output_dir: Path
     restart_xkeen: bool
     dialer_proxies: Sequence[str]
+    single_proxy: bool
+    vless_fingerprint: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,10 +123,21 @@ class _Subscription:
     url: str
 
 
-def _process_subscription(subscription: _Subscription, output_dir: Path, dialer_proxies: Sequence[str]) -> bool:
+def _process_subscription(
+    subscription: _Subscription,
+    output_dir: Path,
+    dialer_proxies: Sequence[str],
+    single_proxy: bool = False,
+    vless_fingerprint: str | None = None,
+) -> bool:
     output_path = output_dir / f"04_outbounds.{subscription.tag}.json"
 
-    xray_config = {"outbounds": _get_outbounds(subscription=subscription, dialer_proxies=dialer_proxies)}
+    xray_config = {"outbounds": _get_outbounds(
+        subscription=subscription,
+        dialer_proxies=dialer_proxies,
+        single_proxy=single_proxy,
+        vless_fingerprint=vless_fingerprint,
+    )}
 
     if output_path.exists() and json.loads(output_path.read_bytes()) == xray_config:
         logging.info("Изменения в подписке %r не найдены, пропускаем.", subscription.tag)
@@ -117,7 +148,12 @@ def _process_subscription(subscription: _Subscription, output_dir: Path, dialer_
     return True
 
 
-def _get_outbounds(subscription: _Subscription, dialer_proxies: Sequence[str]) -> list[dict[str, Any]]:
+def _get_outbounds(
+    subscription: _Subscription,
+    dialer_proxies: Sequence[str],
+    single_proxy: bool = False,
+    vless_fingerprint: str | None = None,
+) -> list[dict[str, Any]]:
     logging.info("Запрашиваем URL подписки: %s.", subscription.url)
     proxy_urls = _get_proxy_urls(subscription)
     proxy_urls.sort()
@@ -137,16 +173,19 @@ def _get_outbounds(subscription: _Subscription, dialer_proxies: Sequence[str]) -
             )
             continue
 
-        tag = f"{subscription.tag}--{_get_proxy_name(proxy_url) or i}"
+        if single_proxy:
+            tag = subscription.tag
+        else:
+            tag = f"{subscription.tag}--{_get_proxy_name(proxy_url) or i}"
 
         tag_counters[tag] += 1
 
         if tag_counters[tag] > 1:
             tag = f"{tag}--{tag_counters[tag]}"
 
-        result.append(_generate_outbound(proxy=proxy, tag=tag))
+        result.append(_generate_outbound(proxy=proxy, tag=tag, vless_fingerprint=vless_fingerprint))
         for dialer_proxy in dialer_proxies:
-            result.append(_generate_outbound(proxy=proxy, tag=f"{tag}--{dialer_proxy}", dialer_proxy=dialer_proxy))
+            result.append(_generate_outbound(proxy=proxy, tag=f"{tag}--{dialer_proxy}", dialer_proxy=dialer_proxy, vless_fingerprint=vless_fingerprint))
 
     return result
 
@@ -226,6 +265,10 @@ def _parse_proxy_url(proxy_url: str) -> "_Proxy":
             public_key=query_params["pbk"],
             short_id=query_params.get("sid"),
             spider_x=query_params.get("spx"),
+            fingerprint=query_params.get("fp", "chrome"),
+            host=query_params.get("host"),
+            path=query_params.get("path"),
+            mode=query_params.get("mode"),
         )
     if parse_result.scheme == "ss":
         assert parse_result.username, "URL должен содержать имя пользователя."
@@ -261,6 +304,10 @@ class _VlessProxy:
     public_key: str
     short_id: str | None
     spider_x: str | None
+    fingerprint: str
+    host: str | None
+    path: str | None
+    mode: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -283,19 +330,35 @@ class _Hysteria2Proxy:
 _Proxy: TypeAlias = _VlessProxy | _ShadowSocksProxy | _Hysteria2Proxy
 
 
-def _generate_outbound(proxy: _Proxy, tag: str, dialer_proxy: str | None = None) -> dict[str, Any]:
+def _generate_outbound(proxy: _Proxy, tag: str, dialer_proxy: str | None = None, vless_fingerprint: str | None = None) -> dict[str, Any]:
     proxy_config: dict[str, Any]
 
     if isinstance(proxy, _VlessProxy):
         reality_settings = {
             "serverName": proxy.server_name,
-            "fingerprint": "firefox",
+            "fingerprint": vless_fingerprint if vless_fingerprint else proxy.fingerprint,
             "publicKey": proxy.public_key,
         }
         if proxy.spider_x:
             reality_settings["spiderX"] = proxy.spider_x
         if proxy.short_id:
             reality_settings["shortId"] = proxy.short_id
+
+        stream_settings: dict[str, Any] = {
+            "network": proxy.network,
+            "security": proxy.security,
+            "realitySettings": reality_settings,
+        }
+
+        if proxy.network == "xhttp" and (proxy.host or proxy.path):
+            xhttp_settings: dict[str, Any] = {}
+            if proxy.host:
+                xhttp_settings["host"] = proxy.host
+            if proxy.path:
+                xhttp_settings["path"] = urllib.parse.unquote(proxy.path)
+            if proxy.mode:
+                xhttp_settings["mode"] = proxy.mode
+            stream_settings["xhttpSettings"] = xhttp_settings
 
         proxy_config = {
             "protocol": "vless",
@@ -314,11 +377,7 @@ def _generate_outbound(proxy: _Proxy, tag: str, dialer_proxy: str | None = None)
                     }
                 ],
             },
-            "streamSettings": {
-                "network": proxy.network,
-                "security": proxy.security,
-                "realitySettings": reality_settings,
-            },
+            "streamSettings": stream_settings,
         }
     elif isinstance(proxy, _ShadowSocksProxy):
         proxy_config = {
