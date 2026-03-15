@@ -4,9 +4,11 @@ import base64
 import json
 import logging
 import subprocess
+import urllib.error
 import urllib.parse
 import urllib.request
 import urllib.response
+from collections import defaultdict
 from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import dataclass
@@ -120,10 +122,28 @@ def _get_outbounds(subscription: _Subscription, dialer_proxies: Sequence[str]) -
     proxy_urls = _get_proxy_urls(subscription)
     proxy_urls.sort()
 
+    tag_counters = defaultdict[str, int](int)
+
     result = []
     for i, proxy_url in enumerate(proxy_urls, 1):
-        proxy = _parse_proxy_url(proxy_url)
+        try:
+            proxy = _parse_proxy_url(proxy_url)
+        except Exception:
+            logging.warning(
+                "Не удалось распарсить URL прокси %r из подписки %r, пропускаем.",
+                proxy_url,
+                subscription.tag,
+                exc_info=True,
+            )
+            continue
+
         tag = f"{subscription.tag}--{_get_proxy_name(proxy_url) or i}"
+
+        tag_counters[tag] += 1
+
+        if tag_counters[tag] > 1:
+            tag = f"{tag}--{tag_counters[tag]}"
+
         result.append(_generate_outbound(proxy=proxy, tag=tag))
         for dialer_proxy in dialer_proxies:
             result.append(_generate_outbound(proxy=proxy, tag=f"{tag}--{dialer_proxy}", dialer_proxy=dialer_proxy))
@@ -135,6 +155,8 @@ def _get_proxy_urls(subscription: _Subscription) -> list[str]:
     try:
         with _request(subscription.url, with_proxy=False) as response:
             response_text = response.read().decode("utf-8")
+    except urllib.error.HTTPError:
+        raise
     except Exception:
         logging.warning(
             "Не удалось получить подписку %s без прокси, пробуем с прокси.", subscription.tag, exc_info=True
@@ -156,7 +178,11 @@ def _request(subscription_url: str, *, with_proxy: bool) -> urllib.response.addi
             {"http": "http://127.0.0.1:8080", "https": "http://127.0.0.1:8080"} if with_proxy else {}
         )
     )
-    return opener.open(subscription_url, timeout=20)
+    request = urllib.request.Request(subscription_url)
+    request.headers["User-Agent"] = (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+    )
+    return opener.open(request, timeout=20)
 
 
 def _parse_subscription_response_text(response_text: str) -> list[str]:
@@ -169,7 +195,7 @@ def _parse_subscription_response_text(response_text: str) -> list[str]:
 
     for line in response_text.splitlines(keepends=False):
         line = line.strip()
-        if line and line.startswith(("vless://", "ss://")):
+        if line and line.startswith(("vless://", "ss://", "hysteria2://")):
             result.append(line)
 
     return result
@@ -193,7 +219,7 @@ def _parse_proxy_url(proxy_url: str) -> "_Proxy":
             port=parse_result.port or 443,
             user_id=parse_result.username,
             encryption=query_params.get("encryption", "none"),
-            flow=query_params["flow"],
+            flow=query_params.get("flow"),
             network=query_params["type"],
             security=query_params["security"],
             server_name=query_params["sni"],
@@ -210,6 +236,15 @@ def _parse_proxy_url(proxy_url: str) -> "_Proxy":
             method=method,
             password=password,
         )
+    if parse_result.scheme == "hysteria2":
+        return _Hysteria2Proxy(
+            address=parse_result.hostname,
+            port=parse_result.port or 443,
+            auth=parse_result.username,
+            insecure=query_params.get("insecure") == "1",
+            sni=query_params.get("sni"),
+        )
+
     raise AssertionError("unreachable")
 
 
@@ -219,7 +254,7 @@ class _VlessProxy:
     port: int
     user_id: str
     encryption: str
-    flow: str
+    flow: str | None
     network: str
     security: str
     server_name: str
@@ -236,7 +271,16 @@ class _ShadowSocksProxy:
     password: str
 
 
-_Proxy: TypeAlias = _VlessProxy | _ShadowSocksProxy
+@dataclass(frozen=True, slots=True)
+class _Hysteria2Proxy:
+    address: str
+    port: int
+    auth: str | None
+    insecure: bool
+    sni: str | None
+
+
+_Proxy: TypeAlias = _VlessProxy | _ShadowSocksProxy | _Hysteria2Proxy
 
 
 def _generate_outbound(proxy: _Proxy, tag: str, dialer_proxy: str | None = None) -> dict[str, Any]:
@@ -264,7 +308,7 @@ def _generate_outbound(proxy: _Proxy, tag: str, dialer_proxy: str | None = None)
                             {
                                 "id": proxy.user_id,
                                 "encryption": proxy.encryption,
-                                "flow": proxy.flow,
+                                "flow": proxy.flow or "",
                             }
                         ],
                     }
@@ -288,6 +332,21 @@ def _generate_outbound(proxy: _Proxy, tag: str, dialer_proxy: str | None = None)
                         "password": proxy.password,
                     }
                 ],
+            },
+        }
+    elif isinstance(proxy, _Hysteria2Proxy):
+        proxy_config = {
+            "protocol": "hysteria",
+            "settings": {"version": 2, "address": proxy.address, "port": proxy.port},
+            "streamSettings": {
+                "network": "hysteria",
+                "security": "tls",
+                "tlsSettings": {"serverName": proxy.sni or proxy.address, "allowInsecure": proxy.insecure},
+                "hysteriaSettings": {
+                    "version": 2,
+                    "auth": proxy.auth,
+                    "keepAlivePeriod": 5,
+                },
             },
         }
     else:
