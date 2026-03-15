@@ -137,7 +137,7 @@ def _get_outbounds(subscription: _Subscription, dialer_proxies: Sequence[str]) -
             )
             continue
 
-        tag = f"{subscription.tag}--{_get_proxy_name(proxy_url) or i}"
+        tag = subscription.tag
 
         tag_counters[tag] += 1
 
@@ -226,6 +226,10 @@ def _parse_proxy_url(proxy_url: str) -> "_Proxy":
             public_key=query_params["pbk"],
             short_id=query_params.get("sid"),
             spider_x=query_params.get("spx"),
+            fingerprint=query_params.get("fp", "chrome"),
+            host=query_params.get("host"),
+            path=query_params.get("path"),
+            mode=query_params.get("mode"),
         )
     if parse_result.scheme == "ss":
         assert parse_result.username, "URL должен содержать имя пользователя."
@@ -261,6 +265,10 @@ class _VlessProxy:
     public_key: str
     short_id: str | None
     spider_x: str | None
+    fingerprint: str
+    host: str | None
+    path: str | None
+    mode: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -289,13 +297,29 @@ def _generate_outbound(proxy: _Proxy, tag: str, dialer_proxy: str | None = None)
     if isinstance(proxy, _VlessProxy):
         reality_settings = {
             "serverName": proxy.server_name,
-            "fingerprint": "firefox",
+            "fingerprint": proxy.fingerprint,
             "publicKey": proxy.public_key,
         }
         if proxy.spider_x:
             reality_settings["spiderX"] = proxy.spider_x
         if proxy.short_id:
             reality_settings["shortId"] = proxy.short_id
+
+        stream_settings: dict[str, Any] = {
+            "network": proxy.network,
+            "security": proxy.security,
+            "realitySettings": reality_settings,
+        }
+
+        if proxy.network == "xhttp" and (proxy.host or proxy.path):
+            xhttp_settings: dict[str, Any] = {}
+            if proxy.host:
+                xhttp_settings["host"] = proxy.host
+            if proxy.path:
+                xhttp_settings["path"] = urllib.parse.unquote(proxy.path)
+            if proxy.mode:
+                xhttp_settings["mode"] = proxy.mode
+            stream_settings["xhttpSettings"] = xhttp_settings
 
         proxy_config = {
             "protocol": "vless",
@@ -314,11 +338,7 @@ def _generate_outbound(proxy: _Proxy, tag: str, dialer_proxy: str | None = None)
                     }
                 ],
             },
-            "streamSettings": {
-                "network": proxy.network,
-                "security": proxy.security,
-                "realitySettings": reality_settings,
-            },
+            "streamSettings": stream_settings,
         }
     elif isinstance(proxy, _ShadowSocksProxy):
         proxy_config = {
