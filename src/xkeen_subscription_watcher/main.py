@@ -29,7 +29,7 @@ def main() -> None:
                 output_dir=args.output_dir,
                 dialer_proxies=args.dialer_proxies,
                 single_proxy=args.single_proxy,
-                vless_fingerprint=args.vless_fingerprint,
+                reality_fingerprint=args.reality_fingerprint,
             )
         except Exception:
             logging.warning("Ошибка при обработке подписки %r, пропускаем.", subscription.tag, exc_info=True)
@@ -69,10 +69,10 @@ def _parse_args() -> "_Args":
         help="Брать только первый прокси из подписки и не добавлять имя к тегу.",
     )
     parser.add_argument(
-        "--vless-fingerprint",
+        "--reality-fingerprint",
         default=None,
-        dest="vless_fingerprint",
-        help="Переопределить fingerprint для VLESS подключений.",
+        dest="reality_fingerprint",
+        help="Переопределить fingerprint для Reality подключений.",
     )
     parser.add_argument("--dialer-proxies", nargs="*", default=())
     args = parser.parse_args()
@@ -103,7 +103,7 @@ def _parse_args() -> "_Args":
         restart_xkeen=args.restart_xkeen,
         dialer_proxies=args.dialer_proxies,
         single_proxy=args.single_proxy,
-        vless_fingerprint=args.vless_fingerprint,
+        reality_fingerprint=args.reality_fingerprint,
     )
 
 
@@ -114,7 +114,7 @@ class _Args:
     restart_xkeen: bool
     dialer_proxies: Sequence[str]
     single_proxy: bool
-    vless_fingerprint: str | None
+    reality_fingerprint: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,7 +128,7 @@ def _process_subscription(
     output_dir: Path,
     dialer_proxies: Sequence[str],
     single_proxy: bool,
-    vless_fingerprint: str | None,
+    reality_fingerprint: str | None,
 ) -> bool:
     output_path = output_dir / f"04_outbounds.{subscription.tag}.json"
 
@@ -137,7 +137,7 @@ def _process_subscription(
             subscription=subscription,
             dialer_proxies=dialer_proxies,
             single_proxy=single_proxy,
-            vless_fingerprint=vless_fingerprint,
+            reality_fingerprint=reality_fingerprint,
         )
     }
 
@@ -154,7 +154,7 @@ def _get_outbounds(
     subscription: _Subscription,
     dialer_proxies: Sequence[str],
     single_proxy: bool,
-    vless_fingerprint: str | None,
+    reality_fingerprint: str | None,
 ) -> list[dict[str, Any]]:
     logging.info("Запрашиваем URL подписки: %s.", subscription.url)
     proxy_urls = _get_proxy_urls(subscription)
@@ -183,13 +183,13 @@ def _get_outbounds(
         if tag_counters[tag] > 1:
             tag = f"{tag}--{tag_counters[tag]}"
 
-        result.append(_generate_outbound(proxy=proxy, tag=tag, vless_fingerprint=vless_fingerprint))
+        result.append(_generate_outbound(proxy=proxy, tag=tag, reality_fingerprint=reality_fingerprint))
         for dialer_proxy in dialer_proxies:
             result.append(
                 _generate_outbound(
                     proxy=proxy,
                     tag=f"{tag}--{dialer_proxy}",
-                    vless_fingerprint=vless_fingerprint,
+                    reality_fingerprint=reality_fingerprint,
                     dialer_proxy=dialer_proxy,
                 )
             )
@@ -341,14 +341,14 @@ _Proxy: TypeAlias = _VlessProxy | _ShadowSocksProxy | _Hysteria2Proxy
 
 
 def _generate_outbound(
-    proxy: _Proxy, tag: str, vless_fingerprint: str | None, dialer_proxy: str | None = None
+    proxy: _Proxy, tag: str, reality_fingerprint: str | None, dialer_proxy: str | None = None
 ) -> dict[str, Any]:
     proxy_config: dict[str, Any]
 
     if isinstance(proxy, _VlessProxy):
         reality_settings = {
             "serverName": proxy.server_name,
-            "fingerprint": vless_fingerprint or proxy.fingerprint or "chrome",
+            "fingerprint": reality_fingerprint or proxy.fingerprint or "chrome",
             "publicKey": proxy.public_key,
         }
         if proxy.spider_x:
