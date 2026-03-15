@@ -155,7 +155,7 @@ def test_main_generates_config_from_plaintext_subscription(tmp_path: Path) -> No
                     "security": "reality",
                     "realitySettings": {
                         "serverName": "edge.example.com",
-                        "fingerprint": "firefox",
+                        "fingerprint": "chrome",
                         "publicKey": "pubkey",
                     },
                 },
@@ -194,7 +194,7 @@ def test_main_generates_sorted_config_from_base64_subscription(tmp_path: Path) -
     assert _load_config(tmp_path, "mix") == {
         "outbounds": [
             {
-                "tag": "mix--1",
+                "tag": "mix",
                 "protocol": "shadowsocks",
                 "settings": {
                     "servers": [
@@ -230,7 +230,7 @@ def test_main_generates_sorted_config_from_base64_subscription(tmp_path: Path) -
                     "security": "reality",
                     "realitySettings": {
                         "serverName": "alpha.example.com",
-                        "fingerprint": "firefox",
+                        "fingerprint": "chrome",
                         "publicKey": "pub-alpha",
                         "spiderX": "/grpc",
                         "shortId": "short-id",
@@ -293,7 +293,7 @@ def test_main_adds_dialer_proxy_variants_without_losing_vless_stream_settings(tm
                     "security": "reality",
                     "realitySettings": {
                         "serverName": "dial.example.com",
-                        "fingerprint": "firefox",
+                        "fingerprint": "chrome",
                         "publicKey": "pub-dial",
                     },
                 },
@@ -321,7 +321,7 @@ def test_main_adds_dialer_proxy_variants_without_losing_vless_stream_settings(tm
                     "security": "reality",
                     "realitySettings": {
                         "serverName": "dial.example.com",
-                        "fingerprint": "firefox",
+                        "fingerprint": "chrome",
                         "publicKey": "pub-dial",
                     },
                     "sockopt": {"dialerProxy": "warp"},
@@ -350,7 +350,7 @@ def test_main_adds_dialer_proxy_variants_without_losing_vless_stream_settings(tm
                     "security": "reality",
                     "realitySettings": {
                         "serverName": "dial.example.com",
-                        "fingerprint": "firefox",
+                        "fingerprint": "chrome",
                         "publicKey": "pub-dial",
                     },
                     "sockopt": {"dialerProxy": "tor"},

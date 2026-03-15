@@ -127,17 +127,19 @@ def _process_subscription(
     subscription: _Subscription,
     output_dir: Path,
     dialer_proxies: Sequence[str],
-    single_proxy: bool = False,
-    vless_fingerprint: str | None = None,
+    single_proxy: bool,
+    vless_fingerprint: str | None,
 ) -> bool:
     output_path = output_dir / f"04_outbounds.{subscription.tag}.json"
 
-    xray_config = {"outbounds": _get_outbounds(
-        subscription=subscription,
-        dialer_proxies=dialer_proxies,
-        single_proxy=single_proxy,
-        vless_fingerprint=vless_fingerprint,
-    )}
+    xray_config = {
+        "outbounds": _get_outbounds(
+            subscription=subscription,
+            dialer_proxies=dialer_proxies,
+            single_proxy=single_proxy,
+            vless_fingerprint=vless_fingerprint,
+        )
+    }
 
     if output_path.exists() and json.loads(output_path.read_bytes()) == xray_config:
         logging.info("Изменения в подписке %r не найдены, пропускаем.", subscription.tag)
@@ -151,8 +153,8 @@ def _process_subscription(
 def _get_outbounds(
     subscription: _Subscription,
     dialer_proxies: Sequence[str],
-    single_proxy: bool = False,
-    vless_fingerprint: str | None = None,
+    single_proxy: bool,
+    vless_fingerprint: str | None,
 ) -> list[dict[str, Any]]:
     logging.info("Запрашиваем URL подписки: %s.", subscription.url)
     proxy_urls = _get_proxy_urls(subscription)
@@ -161,7 +163,7 @@ def _get_outbounds(
     tag_counters = defaultdict[str, int](int)
 
     result = []
-    for i, proxy_url in enumerate(proxy_urls, 1):
+    for proxy_url in proxy_urls:
         try:
             proxy = _parse_proxy_url(proxy_url)
         except Exception:
@@ -173,19 +175,27 @@ def _get_outbounds(
             )
             continue
 
-        if single_proxy:
-            tag = subscription.tag
-        else:
-            tag = f"{subscription.tag}--{_get_proxy_name(proxy_url) or i}"
+        tag = subscription.tag
+        if not single_proxy and (proxy_name := _get_proxy_name(proxy_url)):
+            tag = f"{tag}--{proxy_name}"
 
         tag_counters[tag] += 1
-
         if tag_counters[tag] > 1:
             tag = f"{tag}--{tag_counters[tag]}"
 
         result.append(_generate_outbound(proxy=proxy, tag=tag, vless_fingerprint=vless_fingerprint))
         for dialer_proxy in dialer_proxies:
-            result.append(_generate_outbound(proxy=proxy, tag=f"{tag}--{dialer_proxy}", dialer_proxy=dialer_proxy, vless_fingerprint=vless_fingerprint))
+            result.append(
+                _generate_outbound(
+                    proxy=proxy,
+                    tag=f"{tag}--{dialer_proxy}",
+                    vless_fingerprint=vless_fingerprint,
+                    dialer_proxy=dialer_proxy,
+                )
+            )
+
+        if single_proxy:
+            break
 
     return result
 
@@ -265,7 +275,7 @@ def _parse_proxy_url(proxy_url: str) -> "_Proxy":
             public_key=query_params["pbk"],
             short_id=query_params.get("sid"),
             spider_x=query_params.get("spx"),
-            fingerprint=query_params.get("fp", "chrome"),
+            fingerprint=query_params.get("fp"),
             host=query_params.get("host"),
             path=query_params.get("path"),
             mode=query_params.get("mode"),
@@ -304,7 +314,7 @@ class _VlessProxy:
     public_key: str
     short_id: str | None
     spider_x: str | None
-    fingerprint: str
+    fingerprint: str | None
     host: str | None
     path: str | None
     mode: str | None
@@ -330,13 +340,15 @@ class _Hysteria2Proxy:
 _Proxy: TypeAlias = _VlessProxy | _ShadowSocksProxy | _Hysteria2Proxy
 
 
-def _generate_outbound(proxy: _Proxy, tag: str, dialer_proxy: str | None = None, vless_fingerprint: str | None = None) -> dict[str, Any]:
+def _generate_outbound(
+    proxy: _Proxy, tag: str, vless_fingerprint: str | None, dialer_proxy: str | None = None
+) -> dict[str, Any]:
     proxy_config: dict[str, Any]
 
     if isinstance(proxy, _VlessProxy):
         reality_settings = {
             "serverName": proxy.server_name,
-            "fingerprint": vless_fingerprint if vless_fingerprint else proxy.fingerprint,
+            "fingerprint": vless_fingerprint or proxy.fingerprint or "chrome",
             "publicKey": proxy.public_key,
         }
         if proxy.spider_x:
