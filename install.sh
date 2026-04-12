@@ -15,8 +15,9 @@ detect_arch() {
             ;;
         mips)
             # Определяем порядок байт по ELF-заголовку /bin/sh
-            endian=$(dd if=/bin/sh bs=1 skip=5 count=1 2>/dev/null | od -An -td1 | tr -d ' ')
-            if [ "$endian" = "1" ]; then
+            # Байт 5 ELF: 001 (octal) = little-endian, 002 = big-endian
+            # od -b работает в BusyBox
+            if dd if=/bin/sh bs=1 skip=5 count=1 2>/dev/null | od -b | head -1 | grep -q ' 001'; then
                 echo "mipsel"
             else
                 echo "mips"
