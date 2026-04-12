@@ -1,5 +1,8 @@
 # xkeen-subscription-watcher
 
+[![Test](https://github.com/tkukushkin/xkeen-subscription-watcher/actions/workflows/test.yml/badge.svg)](https://github.com/tkukushkin/xkeen-subscription-watcher/actions/workflows/test.yml)
+[![codecov](https://codecov.io/gh/tkukushkin/xkeen-subscription-watcher/graph/badge.svg)](https://codecov.io/gh/tkukushkin/xkeen-subscription-watcher)
+
 ## Использование
 
 ```bash
@@ -12,12 +15,30 @@ xkeen-subscription-watcher <tag>=<url>
 
 Если конфиги изменились, выполняется `xkeen -restart`.
 
+### Флаги
+
+- `--output-dir <path>` — каталог для конфигов (по умолчанию `/opt/etc/xray/configs`)
+- `--no-restart` — не перезапускать XKeen после обновления
+- `--single-proxy` — брать только первый прокси из подписки
+- `--reality-fingerprint <fp>` — переопределить fingerprint для Reality
+- `--dialer-proxies=<proxy1>,<proxy2>` — dialer proxies через запятую
+
 ## Установка
 
 ```shell
-opkg install python3
-curl -sSo /opt/sbin/xkeen-subscription-watcher https://raw.githubusercontent.com/tkukushkin/xkeen-subscription-watcher/refs/heads/master/src/xkeen_subscription_watcher/main.py
+curl -sSf https://raw.githubusercontent.com/tkukushkin/xkeen-subscription-watcher/master/install.sh | sh
+```
+
+Или вручную — скачать бинарник для своей архитектуры из [Releases](https://github.com/tkukushkin/xkeen-subscription-watcher/releases/latest):
+
+```shell
+curl -sSLo /opt/sbin/xkeen-subscription-watcher <url-бинарника>
 chmod +x /opt/sbin/xkeen-subscription-watcher
+```
+
+### Crontab
+
+```shell
 crontab -e
 ```
 
@@ -26,6 +47,8 @@ crontab -e
 ```crontab
 0 * * * * /opt/sbin/xkeen-subscription-watcher <tag>=<url>
 ```
+
+### Настройка Xray
 
 Убираем из `04_outbounds.json` прокси, которые будут теперь генерироваться из подписок,
 иначе теги будут конфликтовать, оставляем например такое:

@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    strategy:
+      matrix:
+        include:
+        - goos: linux
+          goarch: arm64
+          suffix: arm64
+        - goos: linux
+          goarch: arm
+          goarm: "7"
+          suffix: armv7
+        - goos: linux
+          goarch: mipsle
+          gomips: softfloat
+          suffix: mipsel
+        - goos: linux
+          goarch: mips
+          gomips: softfloat
+          suffix: mips
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v6
+
+    - name: Setup Go
+      uses: actions/setup-go@v6
+      with:
+        go-version-file: go.mod
+
+    - name: Build
+      env:
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+        GOARM: ${{ matrix.goarm }}
+        GOMIPS: ${{ matrix.gomips }}
+        CGO_ENABLED: "0"
+      run: go build -ldflags="-s -w -X main.version=${{ github.event.release.tag_name }}" -o xkeen-subscription-watcher-linux-${{ matrix.suffix }} .
+
+    - name: Upload release asset
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: gh release upload "${{ github.event.release.tag_name }}" xkeen-subscription-watcher-linux-${{ matrix.suffix }}
