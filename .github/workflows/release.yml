@@ -46,7 +46,12 @@ jobs:
         GOARM: ${{ matrix.goarm }}
         GOMIPS: ${{ matrix.gomips }}
         CGO_ENABLED: "0"
-      run: go build -ldflags="-s -w -X main.version=${{ github.event.release.tag_name }}" -o xkeen-subscription-watcher-linux-${{ matrix.suffix }} .
+      run: go build -trimpath -ldflags="-s -w -X main.version=${{ github.event.release.tag_name }}" -o xkeen-subscription-watcher-linux-${{ matrix.suffix }} .
+
+    - name: Compress binary
+      run: |
+        sudo apt-get update && sudo apt-get install -y upx-ucl
+        upx --best xkeen-subscription-watcher-linux-${{ matrix.suffix }}
 
     - name: Upload release asset
       env:

@@ -486,6 +486,308 @@ func TestVersionCommand(t *testing.T) {
 	}
 }
 
+func TestHysteria2Subscription(t *testing.T) {
+	srv := newTestServer(map[string]testResponse{
+		"/sub": {
+			body: "hysteria2://myauth@hy2.example.com:8443?sni=hy2.example.com&insecure=1#HY2 Node\n",
+		},
+	})
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	err := runMain(t,
+		"--output-dir", tmpDir,
+		"--no-restart",
+		fmt.Sprintf("hy=%s/sub", srv.URL),
+	)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+
+	got := loadConfig(t, tmpDir, "hy")
+	want := map[string]any{
+		"outbounds": []any{
+			map[string]any{
+				"tag":      "hy--HY2 Node",
+				"protocol": "hysteria",
+				"settings": map[string]any{
+					"version": float64(2),
+					"address": "hy2.example.com",
+					"port":    float64(8443),
+				},
+				"streamSettings": map[string]any{
+					"network":  "hysteria",
+					"security": "tls",
+					"tlsSettings": map[string]any{
+						"serverName":    "hy2.example.com",
+						"allowInsecure": true,
+					},
+					"hysteriaSettings": map[string]any{
+						"version":         float64(2),
+						"auth":            "myauth",
+						"keepAlivePeriod": float64(5),
+					},
+				},
+			},
+		},
+	}
+
+	assertDeepEqual(t, got, want)
+}
+
+func TestHysteria2FallbackSNI(t *testing.T) {
+	srv := newTestServer(map[string]testResponse{
+		"/sub": {
+			body: "hysteria2://auth@fallback.example.com:443#node\n",
+		},
+	})
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	err := runMain(t,
+		"--output-dir", tmpDir,
+		"--no-restart",
+		fmt.Sprintf("fb=%s/sub", srv.URL),
+	)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+
+	got := loadConfig(t, tmpDir, "fb")
+	outbounds := got["outbounds"].([]any)
+	out := outbounds[0].(map[string]any)
+	ss := out["streamSettings"].(map[string]any)
+	tls := ss["tlsSettings"].(map[string]any)
+
+	if tls["serverName"] != "fallback.example.com" {
+		t.Errorf("expected SNI fallback to address, got %q", tls["serverName"])
+	}
+	if tls["allowInsecure"] != false {
+		t.Error("expected allowInsecure=false when insecure not set")
+	}
+}
+
+func TestVlessXhttpSettings(t *testing.T) {
+	vlessURL := makeVlessURL("user", "xhttp.example.com", 443, "XNode", map[string]string{
+		"type":     "xhttp",
+		"security": "reality",
+		"sni":      "xhttp.example.com",
+		"pbk":      "pub-xhttp",
+		"host":     "cdn.example.com",
+		"path":     "%2Fmy-path",
+		"mode":     "auto",
+	})
+
+	srv := newTestServer(map[string]testResponse{
+		"/sub": {body: vlessURL},
+	})
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	err := runMain(t,
+		"--output-dir", tmpDir,
+		"--no-restart",
+		fmt.Sprintf("xh=%s/sub", srv.URL),
+	)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+
+	got := loadConfig(t, tmpDir, "xh")
+	outbounds := got["outbounds"].([]any)
+	out := outbounds[0].(map[string]any)
+	ss := out["streamSettings"].(map[string]any)
+	xhttp := ss["xhttpSettings"].(map[string]any)
+
+	if xhttp["host"] != "cdn.example.com" {
+		t.Errorf("expected host cdn.example.com, got %q", xhttp["host"])
+	}
+	if xhttp["path"] != "/my-path" {
+		t.Errorf("expected path /my-path, got %q", xhttp["path"])
+	}
+	if xhttp["mode"] != "auto" {
+		t.Errorf("expected mode auto, got %q", xhttp["mode"])
+	}
+}
+
+func TestRealityFingerprintOverride(t *testing.T) {
+	vlessURL := makeVlessURL("user", "fp.example.com", 443, "FP", map[string]string{
+		"type":     "tcp",
+		"security": "reality",
+		"sni":      "fp.example.com",
+		"pbk":      "pub-fp",
+		"fp":       "firefox",
+	})
+
+	srv := newTestServer(map[string]testResponse{
+		"/sub": {body: vlessURL},
+	})
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	err := runMain(t,
+		"--output-dir", tmpDir,
+		"--no-restart",
+		"--reality-fingerprint=safari",
+		fmt.Sprintf("fp=%s/sub", srv.URL),
+	)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+
+	got := loadConfig(t, tmpDir, "fp")
+	outbounds := got["outbounds"].([]any)
+	out := outbounds[0].(map[string]any)
+	ss := out["streamSettings"].(map[string]any)
+	rs := ss["realitySettings"].(map[string]any)
+
+	if rs["fingerprint"] != "safari" {
+		t.Errorf("expected fingerprint override to safari, got %q", rs["fingerprint"])
+	}
+}
+
+func TestVlessFingerprintFromProxy(t *testing.T) {
+	vlessURL := makeVlessURL("user", "fp2.example.com", 443, "FP2", map[string]string{
+		"type":     "tcp",
+		"security": "reality",
+		"sni":      "fp2.example.com",
+		"pbk":      "pub-fp2",
+		"fp":       "firefox",
+	})
+
+	srv := newTestServer(map[string]testResponse{
+		"/sub": {body: vlessURL},
+	})
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	err := runMain(t,
+		"--output-dir", tmpDir,
+		"--no-restart",
+		fmt.Sprintf("fp2=%s/sub", srv.URL),
+	)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+
+	got := loadConfig(t, tmpDir, "fp2")
+	outbounds := got["outbounds"].([]any)
+	out := outbounds[0].(map[string]any)
+	ss := out["streamSettings"].(map[string]any)
+	rs := ss["realitySettings"].(map[string]any)
+
+	if rs["fingerprint"] != "firefox" {
+		t.Errorf("expected fingerprint from proxy firefox, got %q", rs["fingerprint"])
+	}
+}
+
+func TestSingleProxyMode(t *testing.T) {
+	srv := newTestServer(map[string]testResponse{
+		"/sub": {
+			body: makeSSURL("aes-256-gcm", "p1", "first.example.com", 8388, "First") + "\n" +
+				makeSSURL("aes-256-gcm", "p2", "second.example.com", 8388, "Second") + "\n",
+		},
+	})
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	err := runMain(t,
+		"--output-dir", tmpDir,
+		"--no-restart",
+		"--single-proxy",
+		fmt.Sprintf("sp=%s/sub", srv.URL),
+	)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+
+	got := loadConfig(t, tmpDir, "sp")
+	outbounds := got["outbounds"].([]any)
+
+	if len(outbounds) != 1 {
+		t.Fatalf("expected 1 outbound in single-proxy mode, got %d", len(outbounds))
+	}
+	out := outbounds[0].(map[string]any)
+	if out["tag"] != "sp" {
+		t.Errorf("expected tag 'sp' without proxy name, got %q", out["tag"])
+	}
+}
+
+func TestDialerProxyOnShadowsocks(t *testing.T) {
+	ssURL := makeSSURL("aes-256-gcm", "pass", "ss.example.com", 8388, "SS")
+
+	srv := newTestServer(map[string]testResponse{
+		"/sub": {body: ssURL},
+	})
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	err := runMain(t,
+		"--output-dir", tmpDir,
+		"--no-restart",
+		"--dialer-proxies=warp",
+		fmt.Sprintf("ssd=%s/sub", srv.URL),
+	)
+	if err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+
+	got := loadConfig(t, tmpDir, "ssd")
+	outbounds := got["outbounds"].([]any)
+
+	if len(outbounds) != 2 {
+		t.Fatalf("expected 2 outbounds, got %d", len(outbounds))
+	}
+
+	dialerOut := outbounds[1].(map[string]any)
+	if dialerOut["tag"] != "ssd--SS--warp" {
+		t.Errorf("expected tag ssd--SS--warp, got %q", dialerOut["tag"])
+	}
+	ss := dialerOut["streamSettings"].(map[string]any)
+	sockopt := ss["sockopt"].(map[string]any)
+	if sockopt["dialerProxy"] != "warp" {
+		t.Errorf("expected dialerProxy warp, got %q", sockopt["dialerProxy"])
+	}
+}
+
+func TestParseProxyURLErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		want string
+	}{
+		{"unsupported scheme", "wireguard://user@host:443", "неподдерживаемая схема"},
+		{"empty hostname", "vless://user@:443?type=tcp&security=reality&sni=s&pbk=p", "адрес сервера"},
+		{"missing ss credentials", "ss://@host:443", "имя пользователя"},
+		{"bad ss base64", "ss://not-base64@host:443", "декодирования SS"},
+		{"ss credentials no colon", "ss://" + base64.StdEncoding.EncodeToString([]byte("nocolon")) + "@host:443", "формат SS credentials"},
+		{"vless missing user", "vless://@host:443?type=tcp&security=reality&sni=s&pbk=p", "идентификатор пользователя"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseProxyURL(tt.url)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error %q should contain %q", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
+func TestNoSubscriptionsError(t *testing.T) {
+	tmpDir := t.TempDir()
+	err := run([]string{"--output-dir", tmpDir, "--no-restart"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "не указаны подписки") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
 func TestErrorWhenOutputDirIsNotDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 	outputPath := filepath.Join(tmpDir, "not-a-dir")
