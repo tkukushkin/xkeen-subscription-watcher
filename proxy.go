@@ -316,7 +316,7 @@ func decodeVmessPayload(rawURL string) ([]byte, error) {
 // breaking the whole config.
 func validateStreamTransport(protocol, network string) error {
 	switch network {
-	case "tcp", "raw", "ws", "grpc":
+	case "tcp", "raw", "ws", "grpc", "httpupgrade":
 		return nil
 	default:
 		return fmt.Errorf("неподдерживаемый транспорт для %s: %q", protocol, network)

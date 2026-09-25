@@ -12,11 +12,11 @@ import (
 	"unicode"
 )
 
-func fetchProxyURLs(sub subscription) ([]string, error) {
-	body, err := doHTTPRequest(sub.url, false)
+func fetchProxyURLs(cfg config, sub subscription) ([]string, error) {
+	body, err := doHTTPRequest(cfg, sub.url, false)
 	if err != nil {
 		log.Printf("Не удалось получить подписку %q без прокси, пробуем с прокси: %v", sub.tag, err)
-		body, err = doHTTPRequest(sub.url, true)
+		body, err = doHTTPRequest(cfg, sub.url, true)
 		if err != nil {
 			return nil, err
 		}
@@ -25,7 +25,7 @@ func fetchProxyURLs(sub subscription) ([]string, error) {
 	return parseSubscriptionResponse(body), nil
 }
 
-func doHTTPRequest(requestURL string, withProxy bool) (string, error) {
+func doHTTPRequest(cfg config, requestURL string, withProxy bool) (string, error) {
 	var transport *http.Transport
 	if withProxy {
 		proxyURL, _ := url.Parse("http://127.0.0.1:8080")
@@ -39,7 +39,20 @@ func doHTTPRequest(requestURL string, withProxy bool) (string, error) {
 		Transport: transport,
 	}
 
-	resp, err := client.Get(requestURL)
+	req, err := http.NewRequest("GET", requestURL, nil) // use "POST"/"PUT" if needed
+	if err != nil {
+		return "", err
+	}
+
+	if cfg.hwinfo != nil {
+		req.Header.Set("x-hwid", cfg.hwinfo.HWID)
+		req.Header.Set("x-device-os", cfg.hwinfo.DeviceOS)
+		req.Header.Set("x-ver-os", cfg.hwinfo.VersionOS)
+		req.Header.Set("x-device-model", cfg.hwinfo.DeviceModel)
+	}
+
+	resp, err := client.Do(req)
+
 	if err != nil {
 		return "", err
 	}
