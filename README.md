@@ -35,6 +35,9 @@ xkeen-subscription-watcher <tag>=<url>
 - `--single-proxy` — брать только первый прокси из подписки
 - `--reality-fingerprint <fp>` — переопределить fingerprint для Reality
 - `--dialer-proxies=<proxy1>,<proxy2>` — dialer proxies через запятую
+- `--no-hwid` — Отключить получение и отсылку HWID
+- `--cache-dir` — Каталог для сохранения кешированных значений HWID (по умолчанию `/opt/var/run/xkeen-subscription-watcher`)
+- `--no-cache-hwid` — Отключить кеширование HWID. Внимание, HWID будет запрашиваться и вычисляться каждый раз!
 
 ## Установка
 

@@ -35,21 +35,25 @@ func run(args []string) error {
 	return cmd.Execute()
 }
 
-func newRootCmd() *cobra.Command {
-	var (
-		outputDir          string
-		noRestart          bool
-		singleProxy        bool
-		realityFingerprint string
-		dialerProxies      []string
-	)
+type cliFlags struct {
+	outputDir          string
+	cacheDir           string
+	noRestart          bool
+	singleProxy        bool
+	realityFingerprint string
+	dialerProxies      []string
+	noHWID             bool
+	noCacheHWID        bool
+}
 
+func newRootCmd() *cobra.Command {
+	var flags cliFlags
 	cmd := &cobra.Command{
 		Use:   "xkeen-subscription-watcher [flags] <tag>=<url> ...",
 		Short: "Обработка подписок и генерация конфигураций для Xray",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := buildConfig(args, outputDir, !noRestart, singleProxy, realityFingerprint, dialerProxies)
+			cfg, err := buildConfig(args, &flags)
 			if err != nil {
 				return err
 			}
@@ -57,19 +61,20 @@ func newRootCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&outputDir, "output-dir", "/opt/etc/xray/configs",
+	cmd.Flags().StringVar(&flags.outputDir, "output-dir", "/opt/etc/xray/configs",
 		"Каталог для сохранения сгенерированных конфигураций.")
-	cmd.Flags().BoolVar(&noRestart, "no-restart", false,
+	cmd.Flags().StringVar(&flags.cacheDir, "cache-dir", "/opt/var/run/xkeen-subscription-watcher",
+		"Каталог для сохранения кешированных значений HWID.")
+	cmd.Flags().BoolVar(&flags.noRestart, "no-restart", false,
 		"Не перезапускать XKeen после обновления конфигураций.")
-	cmd.Flags().BoolVar(&singleProxy, "single-proxy", false,
+	cmd.Flags().BoolVar(&flags.singleProxy, "single-proxy", false,
 		"Брать только первый прокси из подписки и не добавлять имя к тегу.")
-	cmd.Flags().StringVar(&realityFingerprint, "reality-fingerprint", "",
+	cmd.Flags().StringVar(&flags.realityFingerprint, "reality-fingerprint", "",
 		"Переопределить fingerprint для Reality подключений.")
-	cmd.Flags().StringSliceVar(&dialerProxies, "dialer-proxies", nil,
+	cmd.Flags().StringSliceVar(&flags.dialerProxies, "dialer-proxies", nil,
 		"Dialer proxies через запятую.")
-
-	cmd.AddCommand(newVersionCmd())
-
+	cmd.Flags().BoolVar(&flags.noHWID, "no-hwid", false, "Отключить чтение и отсылку HWID.")
+	cmd.Flags().BoolVar(&flags.noCacheHWID, "no-cache-hwid", false, "Отключить кеширование HWID. Внимание, HWID будет запрашиваться и вычисляться каждый раз!")
 	return cmd
 }
 
@@ -101,6 +106,7 @@ type config struct {
 	dialerProxies      []string
 	singleProxy        bool
 	realityFingerprint string
+	hwinfo             *HardwareInfo
 }
 
 type subscription struct {
@@ -110,10 +116,7 @@ type subscription struct {
 
 func buildConfig(
 	positionalArgs []string,
-	outputDir string,
-	restartXkeen, singleProxy bool,
-	realityFingerprint string,
-	dialerProxies []string,
+	flags *cliFlags,
 ) (config, error) {
 	if len(positionalArgs) == 0 {
 		return config{}, fmt.Errorf("не указаны подписки. Использование: xkeen-subscription-watcher [флаги] <tag>=<url> ...")
@@ -136,18 +139,33 @@ func buildConfig(
 		subs = append(subs, subscription{tag: tag, url: u})
 	}
 
-	info, err := os.Stat(outputDir)
+	info, err := os.Stat(flags.outputDir)
 	if err != nil || !info.IsDir() {
-		return config{}, fmt.Errorf("указанный путь для --output-dir %s не является директорией", outputDir)
+		return config{}, fmt.Errorf("указанный путь для --output-dir %s не является директорией", flags.outputDir)
+	}
+	var hwinfo *HardwareInfo = nil
+	if !flags.noHWID {
+		if strings.HasSuffix(flags.cacheDir, "/") {
+			flags.cacheDir = flags.cacheDir[:len(flags.cacheDir)-1]
+		}
+		err = ensureDir(flags.cacheDir, 0755)
+		if err != nil {
+			return config{}, err
+		}
+		hwinfo, err = FetchHardwareInfo(flags.cacheDir, flags.noCacheHWID)
+		if err != nil {
+			return config{}, fmt.Errorf("невозможно получить hwid, используйте --no-hwid")
+		}
 	}
 
 	return config{
 		subscriptions:      subs,
-		outputDir:          outputDir,
-		restartXkeen:       restartXkeen,
-		dialerProxies:      dialerProxies,
-		singleProxy:        singleProxy,
-		realityFingerprint: realityFingerprint,
+		outputDir:          flags.outputDir,
+		restartXkeen:       !flags.noRestart,
+		dialerProxies:      flags.dialerProxies,
+		singleProxy:        flags.singleProxy,
+		realityFingerprint: flags.realityFingerprint,
+		hwinfo:             hwinfo,
 	}, nil
 }
 
@@ -215,7 +233,7 @@ func processSubscription(sub subscription, cfg config) (bool, error) {
 func getOutbounds(sub subscription, cfg config) ([]any, error) {
 	log.Printf("Запрашиваем URL подписки: %s.", sub.url)
 
-	proxyURLs, err := fetchProxyURLs(sub)
+	proxyURLs, err := fetchProxyURLs(cfg, sub)
 	if err != nil {
 		return nil, err
 	}
@@ -254,4 +272,19 @@ func getOutbounds(sub subscription, cfg config) ([]any, error) {
 	}
 
 	return result, nil
+}
+
+// ensureDir guarantees the specified path exists as a directory and returns an error if creation or validation fails
+func ensureDir(path string, perm os.FileMode) error {
+	if err := os.MkdirAll(path, perm); err != nil {
+		return err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("путь %s существует, но это не директория", path)
+	}
+	return nil
 }
