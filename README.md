@@ -31,7 +31,8 @@ xkeen-subscription-watcher <tag>=<url>
 ### Флаги
 
 - `--output-dir <path>` — каталог для конфигов (по умолчанию `/opt/etc/xray/configs`)
-- `--no-restart` — не перезапускать XKeen после обновления
+- `--no-restart` — отключить перезапуск XKeen
+- `--no-hot-reload` - отключить обновление конфига без перезапуска XKeen
 - `--single-proxy` — брать только первый прокси из подписки
 - `--reality-fingerprint <fp>` — переопределить fingerprint для Reality
 - `--dialer-proxies=<proxy1>,<proxy2>` — dialer proxies через запятую
@@ -84,11 +85,15 @@ crontab -e
 }
 ```
 
-В `05_routing.json` добавляем конфигурацию `balancers` и `burstObservatory` для автоматического выбора лучшего прокси,
-далее в `rules` используем `balancerTag` вместо `outboundTag`, например:
+В `05_routing.json` добавляем секцию `api` для обновления конфига без рестарта XKeen, `balancers` и `burstObservatory` для автоматического выбора лучшего прокси, далее в `rules` используем `balancerTag` вместо `outboundTag`. Пример:
 
 ```json
 {
+  "api": {
+    "tag": "api",
+    "listen": "127.0.0.1:10085",
+    "services": ["HandlerService"]
+  },
   "routing": {
     "domainStrategy": "AsIs",
     "balancers": [
