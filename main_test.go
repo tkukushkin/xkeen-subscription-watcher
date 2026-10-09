@@ -141,6 +141,7 @@ func TestGeneratesConfigFromPlaintextSubscription(t *testing.T) {
 	err := runMain(t,
 		"--output-dir", tmpDir,
 		"--no-restart",
+		"--no-hot-reload",
 		fmt.Sprintf("demo=%s/sub", srv.URL),
 	)
 	if err != nil {
@@ -212,6 +213,7 @@ func TestGeneratesSortedConfigFromBase64Subscription(t *testing.T) {
 	err := runMain(t,
 		"--output-dir", tmpDir,
 		"--no-restart",
+		"--no-hot-reload",
 		fmt.Sprintf("mix=%s/sub", srv.URL),
 	)
 	if err != nil {
@@ -289,6 +291,7 @@ func TestAddsDialerProxyVariants(t *testing.T) {
 	err := runMain(t,
 		"--output-dir", tmpDir,
 		"--no-restart",
+		"--no-hot-reload",
 		"--dialer-proxies=warp,tor",
 		fmt.Sprintf("dial=%s/sub", srv.URL),
 	)
@@ -384,6 +387,7 @@ func TestDoesNotRewriteUnchangedConfig(t *testing.T) {
 	args := []string{
 		"--output-dir", tmpDir,
 		"--no-restart",
+		"--no-hot-reload",
 		fmt.Sprintf("stable=%s/sub", srv.URL),
 	}
 
@@ -438,6 +442,7 @@ func TestContinuesWhenOneSubscriptionFails(t *testing.T) {
 	err := runMain(t,
 		"--output-dir", tmpDir,
 		"--no-restart",
+		"--no-hot-reload",
 		fmt.Sprintf("good=%s/ok", srv.URL),
 		fmt.Sprintf("bad=%s/bad", srv.URL),
 	)
@@ -455,7 +460,7 @@ func TestContinuesWhenOneSubscriptionFails(t *testing.T) {
 
 func TestErrorForSubscriptionWithoutSeparator(t *testing.T) {
 	tmpDir := t.TempDir()
-	err := run([]string{"--output-dir", tmpDir, "--no-restart", "broken"})
+	err := run([]string{"--output-dir", tmpDir, "--no-restart", "--no-hot-reload", "broken"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -469,6 +474,7 @@ func TestErrorForDuplicateTags(t *testing.T) {
 	err := run([]string{
 		"--output-dir", tmpDir,
 		"--no-restart",
+		"--no-hot-reload",
 		"dup=http://example.com/one",
 		"dup=http://example.com/two",
 	})
@@ -485,6 +491,7 @@ func TestErrorForInvalidURLScheme(t *testing.T) {
 	err := run([]string{
 		"--output-dir", tmpDir,
 		"--no-restart",
+		"--no-hot-reload",
 		"demo=ftp://example.com/sub",
 	})
 	if err == nil {
@@ -526,6 +533,7 @@ func TestHysteria2Subscription(t *testing.T) {
 	err := runMain(t,
 		"--output-dir", tmpDir,
 		"--no-restart",
+		"--no-hot-reload",
 		fmt.Sprintf("hy=%s/sub", srv.URL),
 	)
 	if err != nil {
@@ -575,6 +583,7 @@ func TestHysteria2FallbackSNI(t *testing.T) {
 	err := runMain(t,
 		"--output-dir", tmpDir,
 		"--no-restart",
+		"--no-hot-reload",
 		fmt.Sprintf("fb=%s/sub", srv.URL),
 	)
 	if err != nil {
@@ -615,6 +624,7 @@ func TestVlessXhttpSettings(t *testing.T) {
 	err := runMain(t,
 		"--output-dir", tmpDir,
 		"--no-restart",
+		"--no-hot-reload",
 		fmt.Sprintf("xh=%s/sub", srv.URL),
 	)
 	if err != nil {
@@ -656,6 +666,7 @@ func TestRealityFingerprintOverride(t *testing.T) {
 	err := runMain(t,
 		"--output-dir", tmpDir,
 		"--no-restart",
+		"--no-hot-reload",
 		"--reality-fingerprint=safari",
 		fmt.Sprintf("fp=%s/sub", srv.URL),
 	)
@@ -692,6 +703,7 @@ func TestVlessFingerprintFromProxy(t *testing.T) {
 	err := runMain(t,
 		"--output-dir", tmpDir,
 		"--no-restart",
+		"--no-hot-reload",
 		fmt.Sprintf("fp2=%s/sub", srv.URL),
 	)
 	if err != nil {
@@ -722,6 +734,7 @@ func TestSingleProxyMode(t *testing.T) {
 	err := runMain(t,
 		"--output-dir", tmpDir,
 		"--no-restart",
+		"--no-hot-reload",
 		"--single-proxy",
 		fmt.Sprintf("sp=%s/sub", srv.URL),
 	)
@@ -753,6 +766,7 @@ func TestDialerProxyOnShadowsocks(t *testing.T) {
 	err := runMain(t,
 		"--output-dir", tmpDir,
 		"--no-restart",
+		"--no-hot-reload",
 		"--dialer-proxies=warp",
 		fmt.Sprintf("ssd=%s/sub", srv.URL),
 	)
@@ -803,6 +817,7 @@ func TestVmessSubscription(t *testing.T) {
 	err := runMain(t,
 		"--output-dir", tmpDir,
 		"--no-restart",
+		"--no-hot-reload",
 		fmt.Sprintf("vm=%s/sub", srv.URL),
 	)
 	if err != nil {
@@ -869,6 +884,7 @@ func TestVmessFlexIntStringValues(t *testing.T) {
 	err := runMain(t,
 		"--output-dir", tmpDir,
 		"--no-restart",
+		"--no-hot-reload",
 		fmt.Sprintf("flex=%s/sub", srv.URL),
 	)
 	if err != nil {
@@ -914,6 +930,7 @@ func TestTrojanSubscription(t *testing.T) {
 	err := runMain(t,
 		"--output-dir", tmpDir,
 		"--no-restart",
+		"--no-hot-reload",
 		fmt.Sprintf("tj=%s/sub", srv.URL),
 	)
 	if err != nil {
@@ -970,6 +987,7 @@ func TestTrojanTcpNoTransportBlock(t *testing.T) {
 	err := runMain(t,
 		"--output-dir", tmpDir,
 		"--no-restart",
+		"--no-hot-reload",
 		fmt.Sprintf("t2=%s/sub", srv.URL),
 	)
 	if err != nil {
@@ -1011,6 +1029,7 @@ func TestSkipsUnsupportedTransport(t *testing.T) {
 	err := runMain(t,
 		"--output-dir", tmpDir,
 		"--no-restart",
+		"--no-hot-reload",
 		fmt.Sprintf("mix=%s/sub", srv.URL),
 	)
 	if err != nil {
@@ -1044,6 +1063,7 @@ func TestDialerProxyOnTrojan(t *testing.T) {
 	err := runMain(t,
 		"--output-dir", tmpDir,
 		"--no-restart",
+		"--no-hot-reload",
 		"--dialer-proxies=warp",
 		fmt.Sprintf("td=%s/sub", srv.URL),
 	)
@@ -1103,7 +1123,7 @@ func TestParseProxyURLErrors(t *testing.T) {
 
 func TestNoSubscriptionsError(t *testing.T) {
 	tmpDir := t.TempDir()
-	err := run([]string{"--output-dir", tmpDir, "--no-restart"})
+	err := run([]string{"--output-dir", tmpDir, "--no-restart", "--no-hot-reload"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -1122,6 +1142,7 @@ func TestErrorWhenOutputDirIsNotDirectory(t *testing.T) {
 	err := run([]string{
 		"--output-dir", outputPath,
 		"--no-restart",
+		"--no-hot-reload",
 		"demo=http://example.com/sub",
 	})
 	if err == nil {

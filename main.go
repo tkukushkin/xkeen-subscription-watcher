@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime/debug"
 	"sort"
@@ -39,6 +38,7 @@ func newRootCmd() *cobra.Command {
 	var (
 		outputDir          string
 		noRestart          bool
+		noHotReload        bool
 		singleProxy        bool
 		realityFingerprint string
 		dialerProxies      []string
@@ -49,7 +49,7 @@ func newRootCmd() *cobra.Command {
 		Short: "Обработка подписок и генерация конфигураций для Xray",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := buildConfig(args, outputDir, !noRestart, singleProxy, realityFingerprint, dialerProxies)
+			cfg, err := buildConfig(args, outputDir, noRestart, noHotReload, singleProxy, realityFingerprint, dialerProxies)
 			if err != nil {
 				return err
 			}
@@ -60,7 +60,9 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&outputDir, "output-dir", "/opt/etc/xray/configs",
 		"Каталог для сохранения сгенерированных конфигураций.")
 	cmd.Flags().BoolVar(&noRestart, "no-restart", false,
-		"Не перезапускать XKeen после обновления конфигураций.")
+		"Отключить перезапуск XKeen.")
+	cmd.Flags().BoolVar(&noHotReload, "no-hot-reload", false,
+		"Отключить горячую перезагрузку конфигурации.")
 	cmd.Flags().BoolVar(&singleProxy, "single-proxy", false,
 		"Брать только первый прокси из подписки и не добавлять имя к тегу.")
 	cmd.Flags().StringVar(&realityFingerprint, "reality-fingerprint", "",
@@ -97,7 +99,8 @@ func newVersionCmd() *cobra.Command {
 type config struct {
 	subscriptions      []subscription
 	outputDir          string
-	restartXkeen       bool
+	noRestart          bool
+	noHotReload        bool
 	dialerProxies      []string
 	singleProxy        bool
 	realityFingerprint string
@@ -111,7 +114,9 @@ type subscription struct {
 func buildConfig(
 	positionalArgs []string,
 	outputDir string,
-	restartXkeen, singleProxy bool,
+	noRestart bool,
+	noHotReload bool,
+	singleProxy bool,
 	realityFingerprint string,
 	dialerProxies []string,
 ) (config, error) {
@@ -144,7 +149,8 @@ func buildConfig(
 	return config{
 		subscriptions:      subs,
 		outputDir:          outputDir,
-		restartXkeen:       restartXkeen,
+		noRestart:          noRestart,
+		noHotReload:        noHotReload,
 		dialerProxies:      dialerProxies,
 		singleProxy:        singleProxy,
 		realityFingerprint: realityFingerprint,
@@ -152,29 +158,21 @@ func buildConfig(
 }
 
 func execute(cfg config) error {
-	updated := false
+	needRestart := false
 	for _, sub := range cfg.subscriptions {
-		changed, err := processSubscription(sub, cfg)
+		subscriptionNeedsRestart, err := processSubscription(sub, cfg)
 		if err != nil {
 			log.Printf("Ошибка при обработке подписки %q, пропускаем: %v", sub.tag, err)
 			continue
 		}
-		if changed {
-			updated = true
+		if subscriptionNeedsRestart {
+			needRestart = true
 		}
 	}
 
-	if !updated {
-		log.Println("Изменений в подписках не найдено, завершаем работу.")
-		return nil
-	}
-
-	if cfg.restartXkeen {
-		log.Println("Перезапускаем XKeen.")
-		cmd := exec.Command("xkeen", "-restart")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		return cmd.Run()
+	if needRestart && !cfg.noRestart {
+		log.Println("Перезапускаем XKeen")
+		return restartXKeen()
 	}
 
 	return nil
@@ -207,6 +205,17 @@ func processSubscription(sub subscription, cfg config) (bool, error) {
 	log.Printf("Записываем новую конфигурацию для подписки %q в %s.", sub.tag, outputPath)
 	if err := os.WriteFile(outputPath, newContent, 0644); err != nil {
 		return false, fmt.Errorf("ошибка записи файла %s: %w", outputPath, err)
+	}
+
+	if !cfg.noHotReload {
+		log.Printf("Применяем новую конфигурацию для подписки %q", sub.tag)
+
+		if err := hotReloadConfig(sub.tag, newContent); err == nil {
+			log.Printf("Новая конфигурация для подписки %q успешно применена, рестарт XKeen не требуется", sub.tag)
+			return false, nil
+		} else {
+			log.Printf("Не удалось применить новую конфигурацию для подписки %q, требуется рестарт XKeen: %v", sub.tag, err)
+		}
 	}
 
 	return true, nil
