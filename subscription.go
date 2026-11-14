@@ -91,17 +91,23 @@ func parseSubscriptionResponse(body string) []string {
 	return result
 }
 
-func getProxyName(rawURL string) string {
+// rawProxyName возвращает декодированное имя узла из фрагмента URL без очистки.
+func rawProxyName(rawURL string) string {
 	idx := strings.LastIndex(rawURL, "#")
 	if idx < 0 {
 		return ""
 	}
-	name, err := url.QueryUnescape(strings.TrimSpace(rawURL[idx+1:]))
-	if err != nil {
-		name = strings.TrimSpace(rawURL[idx+1:])
+	fragment := strings.TrimSpace(rawURL[idx+1:])
+	if name, err := url.QueryUnescape(fragment); err == nil {
+		return strings.TrimSpace(name)
 	}
+	return fragment
+}
+
+// getProxyName возвращает имя узла для тега: только буквы, цифры, пробел, `-` и `_`.
+func getProxyName(rawURL string) string {
 	var b strings.Builder
-	for _, c := range name {
+	for _, c := range rawProxyName(rawURL) {
 		if unicode.IsLetter(c) || unicode.IsDigit(c) || c == ' ' || c == '-' || c == '_' {
 			b.WriteRune(c)
 		}

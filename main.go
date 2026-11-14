@@ -43,6 +43,8 @@ func newRootCmd() *cobra.Command {
 		realityFingerprint string
 		dialerProxies      []string
 		noHWID             bool
+		include            []string
+		exclude            []string
 	)
 
 	cmd := &cobra.Command{
@@ -55,6 +57,9 @@ func newRootCmd() *cobra.Command {
 				return err
 			}
 			cfg.sendHWID = !noHWID
+			if cfg.filter, err = newNameFilter(include, exclude); err != nil {
+				return err
+			}
 			return execute(cfg)
 		},
 	}
@@ -71,6 +76,10 @@ func newRootCmd() *cobra.Command {
 		"Dialer proxies через запятую.")
 	cmd.Flags().BoolVar(&noHWID, "no-hwid", false,
 		"Не отправлять HWID роутера при запросе подписок.")
+	cmd.Flags().StringArrayVar(&include, "include", nil,
+		"Оставить только узлы, имя которых подходит под маску (*, ?, [...]); можно указать несколько раз.")
+	cmd.Flags().StringArrayVar(&exclude, "exclude", nil,
+		"Отбросить узлы, имя которых подходит под маску (*, ?, [...]); можно указать несколько раз.")
 
 	cmd.AddCommand(newVersionCmd())
 
@@ -107,6 +116,7 @@ type config struct {
 	realityFingerprint string
 	sendHWID           bool
 	device             *deviceInfo
+	filter             nameFilter
 }
 
 type subscription struct {
@@ -328,7 +338,13 @@ func getOutbounds(sub subscription, cfg config) ([]any, error) {
 	tagCounters := make(map[string]int)
 	var result []any
 
+	filtered := 0
 	for _, proxyURL := range proxyURLs {
+		if !cfg.filter.allows(rawProxyName(proxyURL)) {
+			filtered++
+			continue
+		}
+
 		p, err := parseProxyURL(proxyURL)
 		if err != nil {
 			log.Printf("Не удалось распарсить URL прокси %q из подписки %q, пропускаем: %v", proxyURL, sub.tag, err)
@@ -357,5 +373,8 @@ func getOutbounds(sub subscription, cfg config) ([]any, error) {
 		}
 	}
 
+	if filtered > 0 {
+		log.Printf("В подписке %q отфильтровано узлов по --include/--exclude: %d.", sub.tag, filtered)
+	}
 	return result, nil
 }
