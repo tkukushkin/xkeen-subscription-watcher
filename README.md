@@ -3,6 +3,104 @@
 [![Test](https://github.com/tkukushkin/xkeen-subscription-watcher/actions/workflows/test.yml/badge.svg)](https://github.com/tkukushkin/xkeen-subscription-watcher/actions/workflows/test.yml)
 [![codecov](https://codecov.io/gh/tkukushkin/xkeen-subscription-watcher/graph/badge.svg)](https://codecov.io/gh/tkukushkin/xkeen-subscription-watcher)
 
+> [!NOTE]
+> Сам я этой утилитой больше не пользуюсь: перешёл в XKeen на ядро
+> [mihomo](https://github.com/MetaCubeX/mihomo), которое умеет само отслеживать подписки
+> (`proxy-providers`). Рекомендую попробовать его — это не так сложно, как кажется:
+> любой AI-ассистент поможет настроить mihomo под ваши задачи.
+>
+> При этом утилиту я продолжаю поддерживать: если чего-то не хватает или что-то не
+> работает, заводите [issue](https://github.com/tkukushkin/xkeen-subscription-watcher/issues).
+>
+> <details>
+> <summary>Пример моего конфига mihomo</summary>
+>
+> ```yaml
+> log-level: silent
+>
+> mixed-port: 1080
+> redir-port: 1182
+> tproxy-port: 1181
+> allow-lan: true
+> find-process-mode: 'off'
+>
+> external-controller: 0.0.0.0:9090
+> external-ui: ui
+>
+> geo-auto-update: true
+> geo-update-interval: 24
+>
+> proxy-providers:
+>   proxy:
+>     type: http
+>     url: <URL подписки>
+>     interval: 3600
+>     path: ./proxies/proxy
+>
+> proxy-groups:
+>   - name: PROXY
+>     type: select
+>     use: [proxy]
+>
+> rule-providers:
+>   refilter-ips:
+>     type: http
+>     behavior: ipcidr
+>     format: text
+>     url: "https://github.com/1andrevich/Re-filter-lists/releases/latest/download/ipsum.lst"
+>     interval: 86400
+>     path: ./rules/refilter-ips
+>   refilter-domains:
+>     type: http
+>     behavior: domain
+>     format: text
+>     url: "https://github.com/1andrevich/Re-filter-lists/releases/latest/download/domains_all.lst"
+>     interval: 86400
+>     path: ./rules/refilter-domains
+>
+> sniffer:
+>   enable: true
+>   force-dns-mapping: true
+>   sniff:
+>     HTTP:
+>     TLS:
+>     QUIC:
+>
+> rules:
+>   # Блокируем небезопасные UDP порты
+>   - AND,((NETWORK,udp),(DST-PORT,135/137-139)),REJECT
+>   # Блокируем QUIC трафик
+>   - AND,((NETWORK,udp),(DST-PORT,443)),REJECT
+>   # Блокируем рекламу
+>   - GEOSITE,category-ads-all,REJECT
+>   # SOCKS5 и HTTP проксируем без исключений
+>   - IN-TYPE,socks/http,PROXY
+>   # Заблокированные сайты
+>   - RULE-SET,refilter-domains,PROXY
+>   - GEOSITE,ookla-speedtest,PROXY
+>   - GEOSITE,youtube,PROXY
+>   - GEOSITE,openai,PROXY
+>   - GEOSITE,meta,PROXY
+>   - GEOSITE,jetbrains,PROXY
+>   - GEOSITE,github,PROXY
+>   - GEOSITE,x,PROXY
+>   - GEOSITE,notion,PROXY
+>   - GEOSITE,tiktok,PROXY
+>   - GEOSITE,hashicorp,PROXY
+>   - GEOSITE,redis,PROXY
+>   - GEOSITE,reddit,PROXY
+>   - GEOSITE,tailscale,PROXY
+>   - GEOSITE,anthropic,PROXY
+>   # Заблокированные IP
+>   - RULE-SET,refilter-ips,PROXY
+>   # Для тестов
+>   - DOMAIN,ifconfig.co,PROXY
+>   # Остальной трафик пропускаем напрямую
+>   - MATCH,DIRECT
+> ```
+>
+> </details>
+
 ## Использование
 
 ```bash
