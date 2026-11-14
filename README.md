@@ -20,13 +20,13 @@ Xray должен быть включён API (см. [Настройка Xray](#
 
 ### Поддерживаемые протоколы
 
-- `vless` (reality / tls / none; транспорты `tcp`, `raw`, `ws`, `grpc`, `xhttp`)
+- `vless` (reality / tls / none; транспорты `tcp`, `raw`, `ws`, `httpupgrade`, `grpc`, `xhttp`)
 - `vmess` (формат `vmess://base64(JSON)`)
 - `trojan`
 - `shadowsocks` (`ss`)
 - `hysteria2`
 
-Для `vmess` и `trojan` поддерживаются транспорты `tcp`, `raw`, `ws`, `grpc`.
+Для `vmess` и `trojan` поддерживаются транспорты `tcp`, `raw`, `ws`, `httpupgrade`, `grpc`.
 Узлы с транспортами, которые удалены из актуального Xray (`h2`/`http`, `quic`,
 `kcp` и т.п.), пропускаются с предупреждением в логе — чтобы один такой узел не
 ломал весь конфиг.

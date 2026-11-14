@@ -54,16 +54,16 @@ func buildStreamSettings(sp streamParams, address, fingerprintOverride string) m
 	}
 
 	switch sp.network {
-	case "ws":
-		wsSettings := map[string]any{}
+	case "ws", "httpupgrade":
+		settings := map[string]any{}
 		if sp.path != "" {
-			wsSettings["path"] = sp.path
+			settings["path"] = sp.path
 		}
 		if sp.host != "" {
-			wsSettings["host"] = sp.host
+			settings["host"] = sp.host
 		}
-		if len(wsSettings) > 0 {
-			ss["wsSettings"] = wsSettings
+		if len(settings) > 0 {
+			ss[sp.network+"Settings"] = settings
 		}
 
 	case "grpc":

@@ -16,7 +16,7 @@ type proxy interface {
 // streamParams holds the security/transport settings shared by the TLS/transport
 // family of protocols (vless, vmess, trojan). It is consumed by buildStreamSettings.
 type streamParams struct {
-	network       string // tcp | raw | ws | grpc | xhttp (xhttp: vless only)
+	network       string // tcp | raw | ws | httpupgrade | grpc | xhttp (xhttp: vless only)
 	security      string // reality | tls | none
 	serverName    string // sni
 	fingerprint   string // fp (utls)
@@ -316,7 +316,7 @@ func decodeVmessPayload(rawURL string) ([]byte, error) {
 // breaking the whole config.
 func validateStreamTransport(protocol, network string) error {
 	switch network {
-	case "tcp", "raw", "ws", "grpc":
+	case "tcp", "raw", "ws", "httpupgrade", "grpc":
 		return nil
 	default:
 		return fmt.Errorf("неподдерживаемый транспорт для %s: %q", protocol, network)
