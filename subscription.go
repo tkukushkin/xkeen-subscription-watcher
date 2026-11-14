@@ -12,11 +12,12 @@ import (
 	"unicode"
 )
 
-func fetchProxyURLs(sub subscription) ([]string, error) {
-	body, err := doHTTPRequest(sub.url, false)
+// fetchProxyURLs запрашивает подписку; device == nil означает, что заголовки HWID не отправляются.
+func fetchProxyURLs(sub subscription, device *deviceInfo) ([]string, error) {
+	body, err := doHTTPRequest(sub.url, false, device)
 	if err != nil {
 		log.Printf("Не удалось получить подписку %q без прокси, пробуем с прокси: %v", sub.tag, err)
-		body, err = doHTTPRequest(sub.url, true)
+		body, err = doHTTPRequest(sub.url, true, device)
 		if err != nil {
 			return nil, err
 		}
@@ -25,7 +26,7 @@ func fetchProxyURLs(sub subscription) ([]string, error) {
 	return parseSubscriptionResponse(body), nil
 }
 
-func doHTTPRequest(requestURL string, withProxy bool) (string, error) {
+func doHTTPRequest(requestURL string, withProxy bool, device *deviceInfo) (string, error) {
 	var transport *http.Transport
 	if withProxy {
 		proxyURL, _ := url.Parse("http://127.0.0.1:8080")
@@ -39,7 +40,14 @@ func doHTTPRequest(requestURL string, withProxy bool) (string, error) {
 		Transport: transport,
 	}
 
-	resp, err := client.Get(requestURL)
+	req, err := http.NewRequest(http.MethodGet, requestURL, nil)
+	if err != nil {
+		return "", err
+	}
+	if device != nil {
+		device.setHeaders(req.Header)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}

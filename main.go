@@ -42,6 +42,7 @@ func newRootCmd() *cobra.Command {
 		singleProxy        bool
 		realityFingerprint string
 		dialerProxies      []string
+		noHWID             bool
 	)
 
 	cmd := &cobra.Command{
@@ -53,6 +54,7 @@ func newRootCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			cfg.sendHWID = !noHWID
 			return execute(cfg)
 		},
 	}
@@ -67,6 +69,8 @@ func newRootCmd() *cobra.Command {
 		"Переопределить fingerprint для Reality подключений.")
 	cmd.Flags().StringSliceVar(&dialerProxies, "dialer-proxies", nil,
 		"Dialer proxies через запятую.")
+	cmd.Flags().BoolVar(&noHWID, "no-hwid", false,
+		"Не отправлять HWID роутера при запросе подписок.")
 
 	cmd.AddCommand(newVersionCmd())
 
@@ -101,6 +105,8 @@ type config struct {
 	dialerProxies      []string
 	singleProxy        bool
 	realityFingerprint string
+	sendHWID           bool
+	device             *deviceInfo
 }
 
 type subscription struct {
@@ -194,6 +200,15 @@ func writeFileAtomic(path string, content []byte) error {
 }
 
 func execute(cfg config) error {
+	if cfg.sendHWID {
+		device, err := fetchDeviceInfo()
+		if err != nil {
+			return fmt.Errorf("не удалось получить HWID роутера, используйте --no-hwid: %w", err)
+		}
+		log.Printf("Отправляем HWID роутера: %s.", device.HWID)
+		cfg.device = device
+	}
+
 	var updates []*pendingUpdate
 	for _, sub := range cfg.subscriptions {
 		update, err := prepareUpdate(sub, cfg)
@@ -304,7 +319,7 @@ func prepareUpdate(sub subscription, cfg config) (*pendingUpdate, error) {
 func getOutbounds(sub subscription, cfg config) ([]any, error) {
 	log.Printf("Запрашиваем URL подписки: %s.", sub.url)
 
-	proxyURLs, err := fetchProxyURLs(sub)
+	proxyURLs, err := fetchProxyURLs(sub, cfg.device)
 	if err != nil {
 		return nil, err
 	}

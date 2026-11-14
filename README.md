@@ -38,6 +38,7 @@ Xray должен быть включён API (см. [Настройка Xray](#
 - `--single-proxy` — брать только первый прокси из подписки
 - `--reality-fingerprint <fp>` — переопределить fingerprint для Reality
 - `--dialer-proxies=<proxy1>,<proxy2>` — dialer proxies через запятую
+- `--no-hwid` — не отправлять HWID роутера при запросе подписок
 
 ## Установка
 
