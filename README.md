@@ -74,6 +74,14 @@ crontab -e
 0 * * * * /opt/sbin/xkeen-subscription-watcher <tag>=<url>
 ```
 
+Если подпискам нужны разные настройки (например, разные `--include`/`--exclude`),
+команду можно добавить несколько раз, по строке на подписку:
+
+```crontab
+0 * * * * /opt/sbin/xkeen-subscription-watcher --exclude '*Russia*' <tag1>=<url1>
+0 * * * * /opt/sbin/xkeen-subscription-watcher --include '*Germany*' <tag2>=<url2>
+```
+
 ### Настройка Xray
 
 Включаем API Xray с `HandlerService`, например отдельным файлом `00_api.json`:
