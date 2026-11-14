@@ -23,6 +23,12 @@ jobs:
     - name: Vet
       run: go vet ./...
 
+    - name: Download Xray
+      run: |
+        curl -sSfLo "$RUNNER_TEMP/xray.zip" https://github.com/XTLS/Xray-core/releases/download/v26.11.9/Xray-linux-64.zip
+        unzip -o "$RUNNER_TEMP/xray.zip" xray -d "$RUNNER_TEMP/xray"
+        echo "XRAY_BINARY=$RUNNER_TEMP/xray/xray" >> "$GITHUB_ENV"
+
     - name: Run tests
       run: go test -v -race -coverprofile=coverage.out ./...
 

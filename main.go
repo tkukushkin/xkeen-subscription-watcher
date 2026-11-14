@@ -2,12 +2,12 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -60,7 +60,7 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&outputDir, "output-dir", "/opt/etc/xray/configs",
 		"Каталог для сохранения сгенерированных конфигураций.")
 	cmd.Flags().BoolVar(&noRestart, "no-restart", false,
-		"Не перезапускать XKeen после обновления конфигураций.")
+		"Только записать конфигурации, не применяя их к Xray.")
 	cmd.Flags().BoolVar(&singleProxy, "single-proxy", false,
 		"Брать только первый прокси из подписки и не добавлять имя к тегу.")
 	cmd.Flags().StringVar(&realityFingerprint, "reality-fingerprint", "",
@@ -97,7 +97,7 @@ func newVersionCmd() *cobra.Command {
 type config struct {
 	subscriptions      []subscription
 	outputDir          string
-	restartXkeen       bool
+	applyToXray        bool
 	dialerProxies      []string
 	singleProxy        bool
 	realityFingerprint string
@@ -111,7 +111,7 @@ type subscription struct {
 func buildConfig(
 	positionalArgs []string,
 	outputDir string,
-	restartXkeen, singleProxy bool,
+	applyToXray, singleProxy bool,
 	realityFingerprint string,
 	dialerProxies []string,
 ) (config, error) {
@@ -144,72 +144,161 @@ func buildConfig(
 	return config{
 		subscriptions:      subs,
 		outputDir:          outputDir,
-		restartXkeen:       restartXkeen,
+		applyToXray:        applyToXray,
 		dialerProxies:      dialerProxies,
 		singleProxy:        singleProxy,
 		realityFingerprint: realityFingerprint,
 	}, nil
 }
 
+type pendingUpdate struct {
+	sub        subscription
+	path       string
+	oldContent []byte
+	newContent []byte
+}
+
+func (u *pendingUpdate) write(content []byte) error {
+	log.Printf("Записываем конфигурацию подписки %q в %s.", u.sub.tag, u.path)
+	if err := writeFileAtomic(u.path, content); err != nil {
+		return fmt.Errorf("ошибка записи файла %s: %w", u.path, err)
+	}
+	return nil
+}
+
+// writeFileAtomic пишет содержимое во временный файл рядом с path и переименовывает его в
+// path. Имя временного файла оканчивается на .tmp, поэтому Xray его не читает.
+func writeFileAtomic(path string, content []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := tmp.Write(content); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpPath, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
+}
+
 func execute(cfg config) error {
-	updated := false
+	var updates []*pendingUpdate
 	for _, sub := range cfg.subscriptions {
-		changed, err := processSubscription(sub, cfg)
+		update, err := prepareUpdate(sub, cfg)
 		if err != nil {
 			log.Printf("Ошибка при обработке подписки %q, пропускаем: %v", sub.tag, err)
 			continue
 		}
-		if changed {
-			updated = true
+		if update != nil {
+			updates = append(updates, update)
 		}
 	}
 
-	if !updated {
+	if len(updates) == 0 {
 		log.Println("Изменений в подписках не найдено, завершаем работу.")
 		return nil
 	}
 
-	if cfg.restartXkeen {
-		log.Println("Перезапускаем XKeen.")
-		cmd := exec.Command("xkeen", "-restart")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		return cmd.Run()
+	if !cfg.applyToXray {
+		for _, update := range updates {
+			if err := update.write(update.newContent); err != nil {
+				log.Printf("Ошибка при обработке подписки %q: %v", update.sub.tag, err)
+			}
+		}
+		return nil
 	}
 
+	addr, err := findAPIAddress(cfg.outputDir)
+	if err != nil {
+		return err
+	}
+	api := xrayAPI{addr: addr}
+
+	var errs []error
+	for _, update := range updates {
+		if err := applyUpdate(api, update); err != nil {
+			errs = append(errs, fmt.Errorf("подписка %q: %w", update.sub.tag, err))
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("не удалось применить изменения подписок:\n%w", errors.Join(errs...))
+	}
 	return nil
 }
 
-func processSubscription(sub subscription, cfg config) (bool, error) {
+func applyUpdate(api outboundAPI, update *pendingUpdate) error {
+	oldOutbounds, err := parseOutboundsFile(update.oldContent)
+	if err != nil {
+		return fmt.Errorf("ошибка разбора файла %s: %w", update.path, err)
+	}
+	newOutbounds, err := parseOutboundsFile(update.newContent)
+	if err != nil {
+		return fmt.Errorf("ошибка разбора новой конфигурации: %w", err)
+	}
+	changes := diffOutbounds(oldOutbounds, newOutbounds)
+	log.Printf("Применяем изменения подписки %q к Xray: %d добавлено или изменено, %d удалено.",
+		update.sub.tag, len(changes.upserts), len(changes.removals))
+	failed, applyErr := applyChanges(api, changes)
+	if applyErr == nil {
+		return update.write(update.newContent)
+	}
+
+	appliedList := appliedOutbounds(oldOutbounds, newOutbounds, failed)
+	if reflect.DeepEqual(outboundsByTag(appliedList), outboundsByTag(oldOutbounds)) {
+		return applyErr
+	}
+	applied, err := marshalOutbounds(appliedList)
+	if err != nil {
+		return errors.Join(applyErr, err)
+	}
+	log.Printf("Изменения подписки %q применены частично, сохраняем применённую часть.", update.sub.tag)
+	if err := update.write(applied); err != nil {
+		return errors.Join(applyErr, err)
+	}
+	return applyErr
+}
+
+// prepareUpdate получает подписку и генерирует новое содержимое файла, ничего не записывая.
+// Возвращает nil, если содержимое не изменилось.
+func prepareUpdate(sub subscription, cfg config) (*pendingUpdate, error) {
 	outputPath := filepath.Join(cfg.outputDir, fmt.Sprintf("04_outbounds.%s.json", sub.tag))
 
 	outbounds, err := getOutbounds(sub, cfg)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 
-	xrayConfig := map[string]any{
-		"outbounds": outbounds,
-	}
-
-	newContent, err := json.MarshalIndent(xrayConfig, "", "  ")
+	newContent, err := marshalOutbounds(outbounds)
 	if err != nil {
-		return false, fmt.Errorf("ошибка сериализации JSON: %w", err)
+		return nil, err
 	}
-	newContent = append(newContent, '\n')
 
 	existingContent, err := os.ReadFile(outputPath)
-	if err == nil && bytes.Equal(existingContent, newContent) {
+	if err != nil {
+		existingContent = nil
+	} else if bytes.Equal(existingContent, newContent) {
 		log.Printf("Изменения в подписке %q не найдены, пропускаем.", sub.tag)
-		return false, nil
+		return nil, nil
 	}
 
-	log.Printf("Записываем новую конфигурацию для подписки %q в %s.", sub.tag, outputPath)
-	if err := os.WriteFile(outputPath, newContent, 0644); err != nil {
-		return false, fmt.Errorf("ошибка записи файла %s: %w", outputPath, err)
-	}
-
-	return true, nil
+	return &pendingUpdate{
+		sub:        sub,
+		path:       outputPath,
+		oldContent: existingContent,
+		newContent: newContent,
+	}, nil
 }
 
 func getOutbounds(sub subscription, cfg config) ([]any, error) {
