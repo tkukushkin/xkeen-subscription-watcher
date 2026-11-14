@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -91,10 +92,14 @@ func parseSubscriptionResponse(body string) []string {
 	return result
 }
 
-// rawProxyName возвращает декодированное имя узла из фрагмента URL без очистки.
+// rawProxyName возвращает декодированное имя узла без очистки: из фрагмента URL, а у vmess без
+// фрагмента — из поля ps.
 func rawProxyName(rawURL string) string {
 	idx := strings.LastIndex(rawURL, "#")
 	if idx < 0 {
+		if strings.HasPrefix(rawURL, "vmess://") {
+			return vmessName(rawURL)
+		}
 		return ""
 	}
 	fragment := strings.TrimSpace(rawURL[idx+1:])
@@ -102,6 +107,20 @@ func rawProxyName(rawURL string) string {
 		return strings.TrimSpace(name)
 	}
 	return fragment
+}
+
+func vmessName(rawURL string) string {
+	decoded, err := decodeVmessPayload(rawURL)
+	if err != nil {
+		return ""
+	}
+	var payload struct {
+		PS string `json:"ps"`
+	}
+	if err := json.Unmarshal(decoded, &payload); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(payload.PS)
 }
 
 // getProxyName возвращает имя узла для тега: только буквы, цифры, пробел, `-` и `_`.
