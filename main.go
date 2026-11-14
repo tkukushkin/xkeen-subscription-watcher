@@ -121,6 +121,10 @@ func newVersionCmd() *cobra.Command {
 // иначе из позиционных аргументов.
 func subscriptionArgs(positionalArgs []string, tag, url string) ([]string, error) {
 	if tag == "" && url == "" {
+		if len(positionalArgs) > 0 {
+			log.Println("Указание подписок в виде <tag>=<url> устарело и будет удалено в одной из следующих версий. " +
+				"Используйте --tag <tag> --url <url>; для нескольких подписок — по строке в crontab на каждую.")
+		}
 		return positionalArgs, nil
 	}
 	if tag == "" || url == "" {
