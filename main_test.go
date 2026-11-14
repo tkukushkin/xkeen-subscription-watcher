@@ -1107,7 +1107,7 @@ func TestNoSubscriptionsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "не указаны подписки") {
+	if !strings.Contains(err.Error(), "не указана подписка") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }

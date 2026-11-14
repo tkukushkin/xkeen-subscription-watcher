@@ -45,13 +45,19 @@ func newRootCmd() *cobra.Command {
 		noHWID             bool
 		include            []string
 		exclude            []string
+		tagFlag            string
+		urlFlag            string
 	)
 
 	cmd := &cobra.Command{
-		Use:   "xkeen-subscription-watcher [flags] <tag>=<url> ...",
+		Use:   "xkeen-subscription-watcher [flags] --tag <tag> --url <url> | <tag>=<url> ...",
 		Short: "Обработка подписок и генерация конфигураций для Xray",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			args, err := subscriptionArgs(args, tagFlag, urlFlag)
+			if err != nil {
+				return err
+			}
 			cfg, err := buildConfig(args, outputDir, !noRestart, singleProxy, realityFingerprint, dialerProxies)
 			if err != nil {
 				return err
@@ -64,6 +70,10 @@ func newRootCmd() *cobra.Command {
 		},
 	}
 
+	cmd.Flags().StringVar(&tagFlag, "tag", "",
+		"Тег подписки: имя файла 04_outbounds.<tag>.json и префикс тегов узлов. Указывается вместе с --url.")
+	cmd.Flags().StringVar(&urlFlag, "url", "",
+		"URL подписки. Указывается вместе с --tag.")
 	cmd.Flags().StringVar(&outputDir, "output-dir", "/opt/etc/xray/configs",
 		"Каталог для сохранения сгенерированных конфигураций.")
 	cmd.Flags().BoolVar(&noRestart, "no-restart", false,
@@ -107,6 +117,24 @@ func newVersionCmd() *cobra.Command {
 	}
 }
 
+// subscriptionArgs возвращает подписки в виде <tag>=<url>: из --tag и --url, если они заданы,
+// иначе из позиционных аргументов.
+func subscriptionArgs(positionalArgs []string, tag, url string) ([]string, error) {
+	if tag == "" && url == "" {
+		return positionalArgs, nil
+	}
+	if tag == "" || url == "" {
+		return nil, fmt.Errorf("--tag и --url нужно указывать вместе")
+	}
+	if len(positionalArgs) > 0 {
+		return nil, fmt.Errorf("--tag и --url нельзя совмещать с подписками в виде <tag>=<url>")
+	}
+	if strings.Contains(tag, "=") {
+		return nil, fmt.Errorf("--tag не может содержать «=»: %q", tag)
+	}
+	return []string{tag + "=" + url}, nil
+}
+
 type config struct {
 	subscriptions      []subscription
 	outputDir          string
@@ -132,7 +160,7 @@ func buildConfig(
 	dialerProxies []string,
 ) (config, error) {
 	if len(positionalArgs) == 0 {
-		return config{}, fmt.Errorf("не указаны подписки. Использование: xkeen-subscription-watcher [флаги] <tag>=<url> ...")
+		return config{}, fmt.Errorf("не указана подписка. Использование: xkeen-subscription-watcher [флаги] --tag <tag> --url <url>")
 	}
 
 	var subs []subscription

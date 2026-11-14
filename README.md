@@ -6,12 +6,14 @@
 ## Использование
 
 ```bash
-xkeen-subscription-watcher <tag>=<url>
+xkeen-subscription-watcher --tag <tag> --url '<url>'
 ```
 
-Можно передать несколько пар `<tag>=<url>`
+Скрипт получает из подписки прокси и генерирует конфиг `04_outbounds.<tag>.json`.
+Тег `<tag>` становится и префиксом тегов узлов: `<tag>--<имя узла>`.
 
-Скрипт получает из переданных подписок прокси, генерирует конфиги `04_outbounds.<tag>.json`.
+Для совместимости поддерживается и прежняя форма с несколькими подписками в одном
+запуске: `xkeen-subscription-watcher <tag1>=<url1> <tag2>=<url2>`.
 
 Если конфиги изменились, изменения применяются к работающему Xray через его API, без
 перезапуска XKeen и без разрыва соединений. Трогаются только изменившиеся узлы:
@@ -33,6 +35,8 @@ Xray должен быть включён API (см. [Настройка Xray](#
 
 ### Флаги
 
+- `--tag <tag>` — тег подписки: имя файла `04_outbounds.<tag>.json` и префикс тегов узлов
+- `--url <url>` — URL подписки
 - `--output-dir <path>` — каталог для конфигов (по умолчанию `/opt/etc/xray/configs`)
 - `--no-restart` — только записать конфиги, не применяя их к Xray (для локальной проверки)
 - `--single-proxy` — брать только первый прокси из подписки
@@ -46,7 +50,7 @@ Xray должен быть включён API (см. [Настройка Xray](#
 `?` — один символ, `[...]` — один из символов. Маски нужно брать в кавычки:
 
 ```bash
-xkeen-subscription-watcher --exclude '*Russia*' --exclude '*🇷🇺*' <tag>=<url>
+xkeen-subscription-watcher --exclude '*Russia*' --exclude '*🇷🇺*' --tag <tag> --url '<url>'
 ```
 
 ## Установка
@@ -71,15 +75,15 @@ crontab -e
 Добавляем что-то вроде:
 
 ```crontab
-0 * * * * /opt/sbin/xkeen-subscription-watcher <tag>=<url>
+0 * * * * /opt/sbin/xkeen-subscription-watcher --tag <tag> --url '<url>'
 ```
 
-Если подпискам нужны разные настройки (например, разные `--include`/`--exclude`),
-команду можно добавить несколько раз, по строке на подписку:
+Для нескольких подписок команду добавляем несколько раз, по строке на подписку, каждую
+со своими настройками:
 
 ```crontab
-0 * * * * /opt/sbin/xkeen-subscription-watcher --exclude '*Russia*' <tag1>=<url1>
-0 * * * * /opt/sbin/xkeen-subscription-watcher --include '*Germany*' <tag2>=<url2>
+0 * * * * /opt/sbin/xkeen-subscription-watcher --exclude '*Russia*' --tag <tag1> --url '<url1>'
+0 * * * * /opt/sbin/xkeen-subscription-watcher --include '*Germany*' --tag <tag2> --url '<url2>'
 ```
 
 ### Настройка Xray
